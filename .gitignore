@@ -12,9 +12,16 @@ reports/
 conspect_out/
 nb_convert/
 claude_cwd/
+tmp_upload/
 agent_session.json
 questions.jsonl
 weekly_state.json
+cong_no.json
+viec_state.json
+viec_dem.json
+viec_lich_su.jsonl
+viec_can_lam.md
+wikilink_mon.json
 *.log
 *_log*.txt
 *.flag

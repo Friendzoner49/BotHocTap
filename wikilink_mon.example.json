@@ -1,0 +1,10 @@
+{
+  "dir": "wiki/projects/hoc-tap",
+  "subjects": {
+    "toan": {
+      "prefix": "toan",
+      "hub": "toan-tong-quan",
+      "aliases": ["toán", "giải tích", "!MA"]
+    }
+  }
+}

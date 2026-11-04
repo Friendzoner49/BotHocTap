@@ -13,6 +13,9 @@ from google import genai
 from google.genai import types
 import memory as bmem
 import rag
+import viec as bviec  # sau rag: rag nạp .env trước (WIKI_DIR)
+import congno as bcongno
+from datetime import date, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -153,6 +156,9 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/conspect <đề bài> - giải thích tiếng Việt + conspect tiếng Nga (file .md); hoặc gửi file kèm đề bài\n"
         + ("/agent <yêu cầu> - Claude tìm/gửi file bằng lời (kể cả «đẩy lên notebook …»); chủ bot còn được đọc cả ổ chứa bot và nhờ chạy lệnh (mỗi lệnh phải bấm ✅ Chạy)\n" if trusted(update.effective_user.id) else "")
         + ("/note, /model, /notebook, /nbadd, /nbsrc, /nbnew, /screen, /open, /status, /memory - dành cho chủ bot\n"
+           "Nhắc việc (chủ): /viec <việc> | <hạn chót> thêm (không hạn = để sau; dán đề dài hoặc gửi ảnh/file kèm /viec để bot tự rút việc); "
+           "/viec xem (tích ☑, ✏ sửa); /xong <số> tích xong. 9h sáng bot nhắc, tối hỏi lại việc gấp.\n"
+           "Sổ nợ (chủ): gõ «Giang nợ 13k» (Giang nợ tôi) hoặc «nợ Giang 13k» (tôi nợ); /no xem, bấm tên để sửa, đổi USD/RUB/VND, tạo việc trả/nhắc nợ.\n"
            if update.effective_user.id == OWNER_ID else ""))
 
 
@@ -486,6 +492,9 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         path.unlink(missing_ok=True)
     if len(text.strip()) < 200:
         await update.message.reply_text("File gần như không có chữ (có thể là PDF scan). Nêu tên sách + mục trong đề bài: /conspect <đề bài>.")
+        return
+    if update.effective_user.id == OWNER_ID and assign.lower().startswith("/viec"):  # file + chú thích /viec → rút việc và hạn
+        await propose_viec(update.message, text=(assign[5:].strip() + "\n\n" + text)[:30000])
         return
     await run_conspect(update, ctx, assign, text)
 
@@ -1201,6 +1210,74 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_logged_in(uid):
         return  # người lạ: im lặng
+    if uid == OWNER_ID and no_wait.get("id") and time.time() - no_wait.get("ts", 0) < 900 and len(update.message.text) <= (200 if no_wait.get("field") == "note" else 60):
+        msg, field, rid = update.message.text.strip(), no_wait["field"], no_wait["id"]  # đang chờ số tiền/ngày/ghi chú cho một khoản nợ
+        if field == "note":
+            new = "" if re.fullmatch(r"(xóa|xoá|bỏ|không|-)", msg, re.I) else msg
+            r = await asyncio.to_thread(lambda: bcongno.update(rid, note=new))
+            no_wait.clear()
+            await update.message.reply_text((f"Đã ghi chú cho {r['name']}: {new}" if new else f"Đã bỏ ghi chú của {r['name']}.") if r else "Khoản này không còn.")
+        elif field == "amt":
+            a = bcongno.parse_amount(msg)
+            if not a:
+                await update.message.reply_text("Chưa hiểu số tiền. Thử: 20k, 1,5tr, 200 (hoặc «0» để xóa).")
+                return
+            if a[0] == 0:
+                await asyncio.to_thread(bcongno.remove, rid)
+                no_wait.clear()
+                await update.message.reply_text("🗑 Đã xóa khoản này.")
+                return
+            r = await asyncio.to_thread(lambda: bcongno.update(rid, amount=a[0], **({"cur": a[1]} if a[1] else {})))
+            no_wait.clear()
+            await update.message.reply_text(f"Đã sửa: {r['name']} → {bcongno.fmt(r['amount'], r['cur'])}." if r else "Khoản này không còn.")
+        else:
+            d = bviec.parse_due(msg)
+            if d is None:
+                await update.message.reply_text("Chưa hiểu ngày đó. Thử: thứ sáu tuần sau, 13/11, mai, mùng 20.")
+                return
+            no_wait.clear()
+            await no_make_task(update.message, rid, d)
+        return
+    if uid == OWNER_ID and (p := bcongno.parse(update.message.text)):  # «Giang nợ 13k» gõ thẳng, không cần /no
+        await no_add_reply(update.message, p)
+        return
+    if (uid == OWNER_ID and len(update.message.text) <= 80 and re.search(r"\d", update.message.text)
+            and re.search(r"\b(nợ|thiếu|vay|mượn)\b", update.message.text, re.I) and not update.message.text.rstrip().endswith("?")):
+        try:  # câu ngắn có chữ nợ/vay/mượn + số mà luật không hiểu → Gemini thử tách; không chắc thì để hỏi đáp thường xử lý
+            p = await asyncio.to_thread(gemini_debt, update.message.text)
+        except Exception:
+            p = None
+        if p:
+            await no_add_reply(update.message, p)
+            return
+    if uid == OWNER_ID and viec_edit.get("id") and time.time() - viec_edit.get("ts", 0) < 900 and len(update.message.text) <= 200:
+        msg, f = update.message.text.strip(), viec_edit["field"]  # đang chờ tên/hạn mới cho việc bấm ✏
+        if f == "rn":
+            it = await asyncio.to_thread(lambda: bviec.update(viec_edit["id"], text=msg))
+        else:
+            nd = bviec.parse_due(msg)
+            if nd is None and not re.search(r"\b(không|ko|bỏ|để sau)\b", msg, re.I):
+                await update.message.reply_text("Chưa hiểu ngày đó. Thử: thứ sáu tuần sau, 13/11, mai, mùng 20, hoặc «không».")
+                return
+            it = await asyncio.to_thread(lambda: bviec.update(
+                viec_edit["id"], due=nd or date.today() + timedelta(days=7), label=bviec.label_for(nd)))
+        viec_edit.clear()
+        await update.message.reply_text("Đã sửa." if it else "Việc này không còn.")
+        await bviec_promote_and_show(update.message.reply_text)
+        return
+    if uid == OWNER_ID and viec_ask.get("cur") and time.time() - viec_ask.get("ts", 0) < 900 and len(update.message.text) <= 60:
+        # đang chờ chủ nói ngày cụ thể cho một việc có hạn chung chung
+        msg, (vtext, _hint) = update.message.text.strip(), viec_ask["cur"]
+        nd = bviec.parse_due(msg)
+        if nd or re.search(r"\b(không|ko|bỏ qua|để sau)\b", msg, re.I):
+            it = await asyncio.to_thread(bviec.add, vtext, nd)
+            when = f"hạn {bviec.day_name(nd)}" if nd else "không hạn, hỏi lại sau 7 ngày"
+            await update.message.reply_text(f"Đã thêm #{it['id']} vào {LABEL_ICON[it['label']]}: {it['text']} ({when}).")
+            viec_ask.pop("cur", None)
+            await viec_ask_next(update.message.reply_text)
+        else:
+            await update.message.reply_text("Chưa hiểu ngày đó. Thử: thứ sáu tuần sau, 13/11, mai, mùng 20 (hoặc bấm nút ở trên).")
+        return
     if (uid == OWNER_ID and NB_PUSH_RE.search(update.message.text)
             and re.search(r"\b(đẩy|day|tải lên|thêm|upload|nạp|đưa)\b", update.message.text, re.I)):
         await do_agent(update, ctx, update.message.text)  # «tìm … rồi đẩy lên notebook …» → agent chọn file + notebook
@@ -1290,6 +1367,15 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_logged_in(uid):
         return
     await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+    if uid == OWNER_ID and (update.message.caption or "").lower().startswith("/viec"):  # ảnh + chú thích /viec → rút việc và hạn
+        try:
+            img = bytes(await (await ctx.bot.get_file(update.message.photo[-1].file_id)).download_as_bytearray())
+        except Exception:
+            logging.exception("Tải ảnh lỗi")
+            await update.message.reply_text("Không tải được ảnh (mạng/VPN). Thử gửi lại.")
+            return
+        await propose_viec(update.message, text=update.message.caption[5:].strip() or None, img=img)
+        return
     try:
         f = await ctx.bot.get_file(update.message.photo[-1].file_id)
         img = bytes(await f.download_as_bytearray())
@@ -1307,14 +1393,561 @@ async def on_error(update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 COMMANDS = [("find", "Tìm file theo từ khóa, bấm số để nhận"), ("subject", "Xem/chọn môn"), ("note", "Ghi nhanh vào wiki"), ("conspect", "Làm conspect từ đề bài + tài liệu"), ("agent", "Claude tìm/gửi file bằng lời (chỉ đọc)"), ("screen", "Chụp màn hình máy tính"),
-            ("open", "Mở file trên máy tính"), ("status", "Tình trạng máy (ổ đĩa, GPU, OCR)"), ("memory", "Xem/dọn bộ nhớ của bot"),("model", "Chọn Gemini hoặc Claude"), ("notebook", "Hỏi thẳng một notebook NotebookLM"),
+            ("open", "Mở file trên máy tính"), ("status", "Tình trạng máy (ổ đĩa, GPU, OCR)"), ("memory", "Xem/dọn bộ nhớ của bot"), ("viec", "Thêm việc: /viec <việc> | <hạn chót>; trống = xem danh sách"), ("xong", "Tích xong một việc: /xong <số>"), ("no", "Sổ nợ: /no Giang nợ 13k; trống = xem"),("model", "Chọn Gemini hoặc Claude"), ("notebook", "Hỏi thẳng một notebook NotebookLM"),
             ("nbadd", "Đẩy file lên một notebook"), ("nbsrc", "Xem nguồn của notebook đang chọn"),
             ("nbnew", "Tạo notebook mới"),
             ("reset", "Hỏi lại từ đầu"), ("help", "Hướng dẫn"), ("login", "Đăng nhập (người khác)"),
             ("logout", "Đăng xuất")]
 
 
+# ---------- nhắc việc (chỉ chủ): danh sách trong file .md, 9h sáng nhắc, tối hỏi lại việc Gấp; không tốn tiền, không dùng AI ----------
+VIEC_SANG = os.environ.get("NHAC_SANG", "09:00")
+VIEC_TOI = os.environ.get("NHAC_TOI", "23:59")  # «12h đêm»; đổi bằng NHAC_TOI=21:00 trong .env nếu muốn sớm hơn
+VIEC_TUAN = os.environ.get("NHAC_TUAN", "20:00")  # báo cáo cuối tuần, gửi chủ nhật
+VIEC_STATE = ROOT / "viec_state.json"
+LABEL_ICON = {"gap": "🔴 GẤP", "quantrong": "🟠 QUAN TRỌNG", "desau": "🟢 ĐỂ SAU"}
+
+
+def viec_text(items: list) -> str:
+    if not items:
+        return "Chưa có việc nào."
+    out = []
+    for key in ("gap", "quantrong", "desau"):
+        part = [i for i in items if i["label"] == key]
+        if part:
+            out.append(LABEL_ICON[key])
+            out += [f"  {'☑' if i.get('done') else '☐'} #{i['id']} {i['text']} ({bviec.left(i)}{', hỏi lại' if key == 'desau' else ''})" + (f" 🔗{i['link'].strip('[]')}" if i.get("link") else "") for i in
+                    sorted(part, key=lambda i: i["due"])]
+            out.append("")
+    return "\n".join(out).strip()
+
+
+viec_scope = {"s": "today"}  # «today» = việc hôm nay (Gấp + đến hạn/quá hạn); «all» = tất cả
+viec_edit: dict = {}  # {"id", "field": "rn"|"dl", "ts"} khi chờ chủ gõ tên/hạn mới
+
+
+def viec_view(items: list, scope: str):
+    """(văn bản, bàn phím): mỗi việc một hàng [☐ #số tên] [✏], bấm ô để tích xong/bỏ tích."""
+    today = date.today()
+    shown = [i for i in items if scope == "all" or i["label"] == "gap" or i["due"] <= today]
+    head = "📅 Việc hôm nay" if scope == "today" else "📋 Tất cả việc"
+    body = viec_text(shown) if shown else ("Hôm nay chưa có việc gấp." if items else "Chưa có việc nào.")
+    rows = [[InlineKeyboardButton(f"{'☑' if i.get('done') else '☐'} #{i['id']} {i['text'][:26]}", callback_data=f"vi:tg:{i['id']}"),
+             InlineKeyboardButton("✏", callback_data=f"vi:ed:{i['id']}")] for i in sorted(shown, key=lambda i: (i["label"], i["due"]))]
+    nav = [InlineKeyboardButton("📋 Xem tất cả" if scope == "today" else "📅 Chỉ hôm nay", callback_data=f"vi:sc:{'all' if scope == 'today' else 'today'}")]
+    k = sum(1 for i in items if i.get("done"))
+    if k:
+        nav.append(InlineKeyboardButton(f"🗑 Xóa {k} việc đã tích", callback_data="vi:purge:0"))
+    rows.append(nav)
+    return f"{head} ({len(shown)})\n\n{body}\n\nBấm ô để tích ✓ xong, ✏ để sửa. Thêm việc: /viec <việc> | <hạn>.", InlineKeyboardMarkup(rows)
+
+
+viec_pending: dict = {}  # id -> danh sách việc Gemini đề xuất, chờ chủ bấm Thêm
+VIEC_HELP = ("Cách dùng /viec (viết tự nhiên được):\n• /viec nộp lab 5 thứ sáu tuần sau → có hạn: còn ≤ 2 ngày vào GẤP, xa hơn vào QUAN TRỌNG\n"
+             "• /viec mùng 10 nhắc bảo Lan rút tiền · /viec gọi thầy | thứ bảy tuần tới\n"
+             "• /viec dọn wiki → không hạn: vào ĐỂ SAU (hỏi lại sau 1 tuần)\n"
+             "• Hạn hiểu được: 7/11, mai, mốt, thứ sáu, thứ bảy tuần sau/tuần tới, chủ nhật, mùng 10, 2 tuần nữa, cuối tuần…\n"
+             "• Đặt/đổi hạn việc có sẵn: /viec hạn 5 | thứ sáu tuần sau\n"
+             "• Dán cả đề bài dài, hoặc gửi ảnh/file kèm chú thích /viec → tôi tự rút các việc và hạn, bạn bấm Thêm\n"
+             "• /viec không kèm gì: xem danh sách. /xong <số> xóa việc.")
+
+
+def add_viec_text(raw: str):
+    """«việc | hạn» → (text, due, lỗi)."""
+    text, _, d = raw.partition("|")
+    due = None
+    if d.strip():
+        due = bviec.parse_due(d)
+        if due is None:
+            return text.strip(), None, f"Không hiểu hạn «{d.strip()}». Viết kiểu 7/11, mai, thứ sáu tuần sau, mùng 10…"
+    else:
+        due = bviec.parse_in_text(text)  # câu tự nhiên: «mùng 10 nhắc tôi…», «thứ sáu tuần sau nộp lab»
+    return text.strip(), due, ""
+
+
+# Có nói tới hạn nhưng chung chung («tuần sau», «cuối tháng», «sớm»…) → bot hỏi lại ngày cụ thể, KHÔNG tự đoán, KHÔNG cho vào Để sau
+VAGUE = re.compile(r"(?:tuần|tháng|năm|học kỳ|kỳ)\s*(?:này|nay|sau|tới|tiếp theo|nữa)|(?:cuối|đầu|giữa)\s*(?:tuần|tháng|năm|kỳ|học kỳ)"
+                   r"|\bsớm\b|sắp tới|trong\s*(?:tuần|tháng)|\bthứ\b|\bngày\s*\d|\bhạn\b|deadline|trước khi|gấp", re.I)
+viec_ask: dict = {}  # {"queue": [(việc, cụm hạn)], "cur": (việc, cụm hạn), "ts": giây}
+
+
+def gemini_due(raw: str) -> date | None:
+    """Gemini (miễn phí) đoán ngày cụ thể cho cụm hạn chung chung («giữa tháng sau», «cuối tháng»…). Chỉ là ĐỀ XUẤT, chủ xác nhận."""
+    t0 = date.today()
+    cal = "; ".join(bviec.day_name(t0 + timedelta(days=i)) for i in range(15))
+    r = gem.models.generate_content(model=MODEL, contents=[types.Content(role="user", parts=[types.Part(text=(
+        f"Hôm nay là {bviec.day_name(t0)} {t0.year}. Lịch 15 ngày tới: {cal}. Tuần tính từ thứ hai đến chủ nhật. "
+        "Câu sau có nói tới thời hạn nhưng chung chung. Đề xuất MỘT ngày cụ thể hợp lý nhất (vd «cuối tháng» = ngày cuối tháng, "
+        "«giữa tháng sau» = ngày 15 tháng sau, «sớm» = khoảng 3 ngày nữa). Trả JSON thuần {\"due\": \"YYYY-MM-DD\"}, "
+        f"hoặc {{\"due\": null}} nếu câu không nói thời gian.\n\nCâu: {raw}"))])],
+        config=types.GenerateContentConfig(response_mime_type="application/json"))
+    v = json.loads(r.text or "{}").get("due")
+    return date.fromisoformat(v) if v else None
+
+
+async def viec_ask_next(send):
+    q = viec_ask.get("queue") or []
+    if not q:
+        viec_ask.clear()
+        return
+    text, hint = q.pop(0)
+    viec_ask["cur"], viec_ask["ts"] = (text, hint), time.time()
+    sug = bviec.suggest_same(text)  # «tuần sau» → thứ này tuần sau; «tháng/năm sau» → cùng ngày tháng/năm sau
+    if sug is None:
+        try:
+            sug = await asyncio.to_thread(gemini_due, text)
+        except Exception:
+            logging.exception("Gemini đoán hạn lỗi")
+    viec_ask["sug"] = sug
+    first = [InlineKeyboardButton(f"✅ Lấy {bviec.day_name(sug)}", callback_data="vi:qs:0")] if sug else []
+    kb = InlineKeyboardMarkup([first, [InlineKeyboardButton("✏ Nhập ngày khác", callback_data="vi:qn:0")],
+                               [InlineKeyboardButton("🟢 Không có hạn (để sau)", callback_data="vi:ql:0"),
+                                InlineKeyboardButton("🗑 Bỏ việc này", callback_data="vi:qx:0")]] if sug else
+                              [[InlineKeyboardButton("🟢 Không có hạn (để sau)", callback_data="vi:ql:0"),
+                                InlineKeyboardButton("🗑 Bỏ việc này", callback_data="vi:qx:0")]])
+    await send(f"❓ «{text}»: hạn «{hint}» còn chung chung."
+               + (f" Tôi đề xuất {bviec.day_name(sug)}." if sug else " Hạn chót cụ thể là ngày nào?")
+               + "\nBấm nút, hoặc gõ ngày: thứ sáu tuần sau, 13/11, mai, mùng 20…", reply_markup=kb)
+
+
+EXTRACT_PROMPT = ("Hôm nay là {today}. Đọc nội dung dưới đây (đề bài/thông báo của trường) và rút ra các VIỆC sinh viên phải làm. "
+                  "Trả về JSON thuần: [{{\"task\": \"tên việc ngắn gọn bằng tiếng Việt, giữ nguyên tên riêng/tên sách/tên môn ở dạng chữ gốc (ví dụ Ткачев)\", \"due\": \"YYYY-MM-DD nếu nêu ngày cụ thể, ngược lại null\", "
+                  "\"vague\": \"cụm hạn chung chung nguyên văn (vd: cuối tháng, tuần sau) nếu đề có nói tới hạn nhưng không có ngày cụ thể, ngược lại null\"}}]. "
+                  "Tối đa 8 việc, không bịa hạn chót, không lặp.")
+
+
+def extract_tasks(text: str | None = None, img: bytes | None = None) -> list:
+    parts = ([types.Part.from_bytes(data=img, mime_type="image/jpeg")] if img else []) + [
+        types.Part(text=EXTRACT_PROMPT.format(today=date.today().isoformat()) + (f"\n\n{text}" if text else ""))]
+    r = gem.models.generate_content(model=MODEL, contents=[types.Content(role="user", parts=parts)],
+                                    config=types.GenerateContentConfig(response_mime_type="application/json"))
+    out = []
+    for e in json.loads(r.text or "[]")[:8]:
+        due = bviec.parse_due(str(e.get("due") or "")) if e.get("due") else None
+        if str(e.get("task") or "").strip():
+            out.append({"task": str(e["task"]).strip()[:120], "due": due,
+                        "vague": (str(e.get("vague")).strip()[:40] if e.get("vague") and not due else None)})
+    return out
+
+
+async def propose_viec(message, text: str | None = None, img: bytes | None = None):
+    try:
+        found = await asyncio.to_thread(extract_tasks, text, img)
+    except Exception:
+        logging.exception("Rút việc lỗi")
+        await message.reply_text("Không rút được việc (mạng/VPN hoặc Gemini đang giới hạn). Thử lại, hoặc gõ /viec <việc> | <hạn>.")
+        return
+    if not found:
+        await message.reply_text("Tôi không thấy việc nào trong nội dung này. Gõ tay: /viec <việc> | <hạn>.")
+        return
+    pid = str(int(time.time() * 1000))[-8:]
+    viec_pending[pid] = found
+    lines = [f"• {e['task']} — " + (f"hạn {bviec.day_name(e['due'])} → {LABEL_ICON[bviec.label_for(e['due'])]}" if e["due"]
+                                    else f"hạn «{e['vague']}» chung chung → tôi sẽ hỏi lại ngày" if e.get("vague")
+                                    else "không nêu hạn → ĐỂ SAU") for e in found]
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("➕ Thêm tất cả", callback_data=f"vi:addall:{pid}"),
+                                InlineKeyboardButton("❌ Bỏ", callback_data=f"vi:skip:{pid}")]])
+    await message.reply_text("Tôi thấy các việc sau:\n\n" + "\n".join(lines) + "\n\nThêm vào danh sách?", reply_markup=kb)
+
+
+async def cmd_viec(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    parts = (update.message.text or "").split(None, 1)
+    raw = parts[1].strip() if len(parts) > 1 else ""
+    if not raw:
+        viec_scope["s"] = "today"
+        await bviec_promote_and_show(update.message.reply_text)
+        if not await asyncio.to_thread(bviec.load):
+            await update.message.reply_text(VIEC_HELP)
+        return
+    if len(raw) > 200 or "\n" in raw:  # đề bài dài → để Gemini rút việc + hạn
+        await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+        await propose_viec(update.message, text=raw)
+        return
+    if raw.lower() in ("tuần", "tuan", "báo cáo", "bao cao"):  # /viec tuần → xem báo cáo 7 ngày ngay
+        await update.message.reply_text(await asyncio.to_thread(bviec.week_report) or "Chưa có gì để báo cáo.")
+        return
+    m = re.match(r"(?:hạn|han|sửa)\s+#?(\d+)\s*\|\s*(.+)$", raw, re.I)  # /viec hạn 5 | thứ sáu tuần sau → đặt/đổi hạn của việc #5
+    if m:
+        nd = bviec.parse_due(m.group(2))
+        if nd is None:
+            await update.message.reply_text("Không hiểu hạn đó. Viết kiểu 7/11, mai, thứ sáu tuần sau, mùng 10…")
+            return
+        it = await asyncio.to_thread(lambda: bviec.update(int(m.group(1)), due=nd, label=bviec.label_for(nd)))
+        await update.message.reply_text(f"Đã đặt hạn #{it['id']} «{it['text']}»: {bviec.day_name(nd)} → {LABEL_ICON[it['label']]}." if it
+                                        else f"Không thấy việc #{m.group(1)}.")
+        return
+    text, due, err = add_viec_text(raw)
+    if err or not text:
+        await update.message.reply_text(err or VIEC_HELP)
+        return
+    vg = VAGUE.search(text) if due is None and "|" not in raw else None
+    if vg:  # có nói tới hạn nhưng chung chung → hỏi lại, chưa thêm
+        viec_ask.setdefault("queue", []).append((text, vg.group(0)))
+        if viec_ask.get("cur"):  # đang hỏi việc khác → xếp hàng, hỏi sau
+            await update.message.reply_text(f"Ghi nhận «{text}», hạn chung chung nên tôi sẽ hỏi ngày sau khi bạn trả lời câu trước.")
+        else:
+            await viec_ask_next(update.message.reply_text)
+        return
+    it = await asyncio.to_thread(bviec.add, text, due)
+    when = f"hạn {bviec.day_name(it['due'])}" if due else "không có hạn nên để sau, hỏi lại sau 7 ngày"
+    await update.message.reply_text(f"Đã thêm #{it['id']} vào {LABEL_ICON[it['label']]}: {it['text']} ({when})."
+                                     + (f"\n🔗 Đã gắn {it['link']} (Obsidian)" if it.get("link") else ""))
+
+
+async def bviec_promote_and_show(send):
+    await asyncio.to_thread(bviec.promote)
+    items = await asyncio.to_thread(bviec.load)
+    text, kb = viec_view(items, viec_scope["s"])
+    await send(text, reply_markup=kb)
+
+
+async def viec_refresh(q):
+    """Vẽ lại danh sách ngay trên tin nhắn đang bấm (tích/sửa xong thấy liền)."""
+    await asyncio.to_thread(bviec.promote)
+    text, kb = viec_view(await asyncio.to_thread(bviec.load), viec_scope["s"])
+    try:
+        await q.edit_message_text(text, reply_markup=kb)
+    except Exception:  # «message is not modified» hoặc tin quá cũ → gửi tin mới
+        await q.message.reply_text(text, reply_markup=kb)
+
+
+async def cmd_xong(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    arg = (ctx.args or [""])[0].lstrip("#")
+    if not arg.isdigit():
+        await update.message.reply_text("Gõ: /xong <số việc>, ví dụ /xong 3 (xem số bằng /viec).")
+        return
+    it = await asyncio.to_thread(lambda: bviec.update(int(arg), done=True))
+    await update.message.reply_text(f"☑ Đã tích xong: {it['text']} (sáng mai bot xóa khỏi danh sách)" if it else f"Không thấy việc #{arg}.")
+
+
+async def on_viec(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != OWNER_ID:
+        return
+    _, act, sid = q.data.split(":")
+    if act in ("addall", "skip"):
+        found = viec_pending.pop(sid, None)
+        if not found or act == "skip":
+            await q.message.reply_text("Đã bỏ." if found else "Danh sách đề xuất này đã hết hạn, gửi lại để rút lần nữa.")
+            return
+        unsure = [(e["task"], e["vague"]) for e in found if e.get("vague") and not e["due"]]
+        for e in found:
+            if not (e.get("vague") and not e["due"]):  # việc hạn chung chung chưa thêm, chờ chủ trả lời ngày
+                await asyncio.to_thread(bviec.add, e["task"], e["due"])
+        await q.message.reply_text(f"✅ Đã thêm {len(found) - len(unsure)} việc." + (f" {len(unsure)} việc còn hạn chung chung, tôi hỏi từng việc:" if unsure else ""))
+        await bviec_promote_and_show(q.message.reply_text)
+        if unsure:
+            viec_ask.setdefault("queue", []).extend(unsure)
+            if not viec_ask.get("cur"):
+                await viec_ask_next(q.message.reply_text)
+        return
+    if act in ("ql", "qx"):  # trả lời nút của câu hỏi hạn chung chung
+        cur = viec_ask.get("cur")
+        if not cur:
+            await q.message.reply_text("Câu hỏi này đã xong rồi.")
+            return
+        if act == "ql":
+            it = await asyncio.to_thread(bviec.add, cur[0], None)
+            await q.message.reply_text(f"Đã thêm #{it['id']} vào {LABEL_ICON['desau']}: {it['text']} (không hạn, hỏi lại sau 7 ngày).")
+        else:
+            await q.message.reply_text(f"🗑 Đã bỏ: {cur[0]}")
+        viec_ask.pop("cur", None)
+        await viec_ask_next(q.message.reply_text)
+        return
+    if act == "qs":  # lấy ngày bot đề xuất
+        cur, sug = viec_ask.get("cur"), viec_ask.get("sug")
+        if not cur or not sug:
+            await q.message.reply_text("Câu hỏi này đã xong rồi.")
+            return
+        it = await asyncio.to_thread(bviec.add, cur[0], sug)
+        await q.message.reply_text(f"Đã thêm #{it['id']} vào {LABEL_ICON[it['label']]}: {it['text']} (hạn {bviec.day_name(sug)}).")
+        viec_ask.pop("cur", None)
+        await viec_ask_next(q.message.reply_text)
+        return
+    if act == "qn":
+        await q.message.reply_text("Gõ ngày cụ thể (thứ sáu tuần sau, 13/11, mai, mùng 20…):")
+        return
+    if act == "sc":
+        viec_scope["s"] = sid
+        await viec_refresh(q)
+        return
+    if act == "purge":
+        n = await asyncio.to_thread(bviec.purge_done)
+        await q.message.reply_text(f"🗑 Đã xóa {n} việc đã tích.")
+        await viec_refresh(q)
+        return
+    iid = int(sid)
+    if act == "tg":  # tích xong / bỏ tích
+        await asyncio.to_thread(bviec.toggle, iid)
+        await viec_refresh(q)
+    elif act == "bk":
+        await viec_refresh(q)
+    elif act == "ed":  # menu sửa một việc
+        it = next((i for i in await asyncio.to_thread(bviec.load) if i["id"] == iid), None)
+        if not it:
+            await q.message.reply_text(f"Việc #{iid} không còn.")
+            return
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✏ Đổi tên", callback_data=f"vi:rn:{iid}"),
+                                    InlineKeyboardButton("📅 Đổi hạn", callback_data=f"vi:dl:{iid}")],
+                                   [InlineKeyboardButton("🗑 Xóa việc", callback_data=f"vi:del:{iid}"),
+                                    InlineKeyboardButton("↩ Quay lại", callback_data=f"vi:bk:{iid}")]])
+        try:
+            await q.edit_message_text(f"✏ Sửa #{iid}: {it['text']}\n{LABEL_ICON[it['label']]} · {'hỏi lại' if it['label'] == 'desau' else 'hạn'} {bviec.day_name(it['due'])}", reply_markup=kb)
+        except Exception:
+            await q.message.reply_text(f"✏ Sửa #{iid}: {it['text']}", reply_markup=kb)
+    elif act in ("rn", "dl"):
+        viec_edit.clear()
+        viec_edit.update(id=iid, field=act, ts=time.time())
+        await q.message.reply_text("Gõ tên mới cho việc này:" if act == "rn" else "Gõ hạn mới (thứ sáu tuần sau, 13/11, mai…; gõ «không» nếu bỏ hạn):")
+    elif act == "done":
+        it = await asyncio.to_thread(lambda: bviec.update(iid, done=True))
+        await q.message.reply_text(f"☑ Xong: {it['text']} (sáng mai bot xóa khỏi danh sách)" if it else f"Việc #{iid} không còn.")
+    elif act == "del":
+        gone = await asyncio.to_thread(bviec.remove, iid)
+        await q.message.reply_text(f"🗑 Đã xóa: {gone['text']}" if gone else f"Việc #{iid} không còn.")
+        if gone:
+            await viec_refresh(q)
+    elif act == "wk":
+        await asyncio.to_thread(bviec.bump, iid, "hoi")  # đếm số lần hoãn; ≥ 3 lần thì lần sau bot đề nghị xóa hẳn
+        it = await asyncio.to_thread(lambda: bviec.update(iid, due=date.today() + timedelta(days=7)))
+        await q.message.reply_text(f"⏳ Hỏi lại sau 7 ngày: {it['text']}" if it else f"Việc #{iid} không còn.")
+    elif act == "up":
+        it = await asyncio.to_thread(lambda: bviec.update(iid, label="quantrong", due=date.today() + timedelta(days=4)))
+        await q.message.reply_text(f"⬆ Chuyển sang Quan trọng (hạn 4 ngày): {it['text']}" if it else f"Việc #{iid} không còn.")
+    elif act == "no":
+        n = await asyncio.to_thread(bviec.bump, iid, "hoan")
+        await q.message.reply_text("Giữ lại, tối mai tôi hỏi tiếp." + (f" (Việc này đã hoãn {n} lần.)" if n >= 2 else ""))
+
+
+async def viec_morning(bot):
+    await asyncio.to_thread(bviec.purge_done)  # việc đã tích hôm qua → xóa khỏi danh sách
+    moved = await asyncio.to_thread(bviec.promote)
+    items = await asyncio.to_thread(bviec.load)
+    if items:
+        viec_scope["s"] = "today"
+        text, kb = viec_view(items, "today")
+        note = ("\n\n⬆ Tự lên Gấp vì còn ≤ 2 ngày: " + ", ".join(f"#{i['id']}" for i in moved)) if moved else ""
+        await bot.send_message(OWNER_ID, "☀ " + text + note, reply_markup=kb)
+    for it in await asyncio.to_thread(bviec.checkin_due):
+        n = await asyncio.to_thread(bviec.count, it["id"], "hoi")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Xóa hẳn", callback_data=f"vi:del:{it['id']}"),
+                                    InlineKeyboardButton("⏳ Giữ thêm 1 tuần", callback_data=f"vi:wk:{it['id']}")],
+                                   [InlineKeyboardButton("⬆ Lên Quan trọng", callback_data=f"vi:up:{it['id']}"),
+                                    InlineKeyboardButton("✅ Xong", callback_data=f"vi:done:{it['id']}")]]) if n >= 3 else InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⏳ Hỏi lại sau 1 tuần", callback_data=f"vi:wk:{it['id']}"),
+              InlineKeyboardButton("⬆ Lên Quan trọng", callback_data=f"vi:up:{it['id']}")],
+             [InlineKeyboardButton("✅ Xong", callback_data=f"vi:done:{it['id']}"),
+              InlineKeyboardButton("🗑 Bỏ", callback_data=f"vi:del:{it['id']}")]])
+        await bot.send_message(OWNER_ID, (f"📌 «{it['text']}» để sau đã được 1 tuần. Bạn muốn làm gì với nó?" if n < 3 else
+                                          f"🧹 «{it['text']}» đã hoãn {n} lần ở mục Để sau. Có lẽ không cần làm nữa, xóa hẳn nhé?"), reply_markup=kb)
+
+
+async def viec_week(bot):
+    rep = await asyncio.to_thread(bviec.week_report)
+    if rep:
+        await bot.send_message(OWNER_ID, rep)
+
+
+async def viec_evening(bot):
+    for it in [i for i in await asyncio.to_thread(bviec.load) if i["label"] == "gap" and not i.get("done")]:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Xong rồi", callback_data=f"vi:done:{it['id']}"),
+                                    InlineKeyboardButton("⏳ Chưa", callback_data=f"vi:no:{it['id']}")]])
+        await bot.send_message(OWNER_ID, f"🔔 Việc gấp #{it['id']}: «{it['text']}» ({bviec.left(it)}). Làm xong chưa?", reply_markup=kb)
+
+
+async def viec_loop(app: Application):
+    """Mỗi 30 giây kiểm tra giờ. Máy tắt lúc 9h thì bật lên là nhắc bù (trong ngày). Mỗi buổi chỉ gửi một lần/ngày."""
+    while True:
+        try:
+            now = time.strftime("%H:%M")
+            today = time.strftime("%Y-%m-%d")
+            try:
+                st = json.loads(VIEC_STATE.read_text(encoding="utf-8"))
+            except Exception:
+                st = {}
+            slots = [("sang", VIEC_SANG, viec_morning), ("toi", VIEC_TOI, viec_evening)]
+            if time.localtime().tm_wday == 6:  # chủ nhật: thêm báo cáo tuần
+                slots.append(("tuan", VIEC_TUAN, viec_week))
+            for key, at, fn in slots:
+                if now >= at and st.get(key) != today:
+                    st[key] = today
+                    VIEC_STATE.write_text(json.dumps(st), encoding="utf-8")  # ghi trước để lỗi mạng không làm gửi lặp
+                    await fn(app.bot)
+        except Exception:
+            logging.exception("Nhắc việc lỗi")
+        await asyncio.sleep(30)
+
+
+# ---------- sổ nợ (chỉ chủ, tạm thời, KHÔNG ghi wiki): «Giang nợ 13k» / «nợ Giang 13k»; tạo việc trả nợ/nhắc nợ ----------
+no_wait: dict = {}  # {"id", "field": "amt"|"date", "ts"} khi chờ chủ gõ số tiền/ngày mới
+NO_DIR = {"owe_me": "🟢 Nợ tôi", "i_owe": "🔴 Tôi nợ"}
+NO_HELP = ("Sổ nợ: gõ «Giang nợ 13k» (Giang nợ tôi), «nợ Giang 13k» hoặc «tôi nợ Giang 13k» (tôi nợ Giang). "
+           "13k = 13.000, 1,5tr = 1.500.000, thêm usd/rub nếu cần. Ghi chú: thêm sau dấu chấm hoặc xuống dòng («Giang nợ 13k. tiền cơm»); không có dấu chấm thì không có ghi chú. /no xem danh sách; bấm tên để sửa, đổi tiền tệ, tạo việc.")
+
+
+NO_WORDS = re.compile(r"\b(nợ|thiếu|vay|mượn|trả)\b", re.I)
+
+
+def gemini_debt(raw: str):
+    """Dự phòng khi luật không hiểu câu: nhờ Gemini (miễn phí) tách người, chiều nợ, số tiền. Không chắc thì trả None. Ghi chú chỉ lấy từ phần sau dấu chấm/xuống dòng."""
+    raw, note = bcongno.split_note(raw)
+    r = gem.models.generate_content(model=MODEL, contents=[types.Content(role="user", parts=[types.Part(text=(
+        "Người viết câu sau là CHỦ SỔ NỢ. Họ tự xưng bằng: tôi, tao, tớ, tui, mình, bố, bố mày, bố m, ông đây… (tất cả đều là CHỦ SỔ NỢ). "
+        "Tách khoản nợ: trả JSON thuần {\"name\": \"tên người kia\", \"dir\": \"owe_me\" nếu người kia nợ/vay/mượn của chủ, "
+        "\"i_owe\" nếu chủ nợ/vay/mượn của người kia, \"amount\": số nguyên (13k = 13000, 2tr = 2000000), "
+        "\"cur\": \"VND\"|\"USD\"|\"RUB\"|null}. Nếu câu không phải một khoản nợ cụ thể thì trả {\"name\": null}.\n\nCâu: " + raw))])],
+        config=types.GenerateContentConfig(response_mime_type="application/json"))
+    d = json.loads(r.text or "{}")
+    if isinstance(d, list):  # Gemini đôi khi bọc kết quả trong mảng
+        d = d[0] if d else {}
+    if not isinstance(d, dict) or not d.get("name") or d.get("dir") not in ("owe_me", "i_owe") or not isinstance(d.get("amount"), (int, float)) or d["amount"] <= 0:
+        return None
+    return {"name": str(d["name"]).strip()[:40], "dir": d["dir"], "amount": int(d["amount"]),
+            "cur": d.get("cur") if d.get("cur") in bcongno.CURS else "VND", "note": note}
+
+
+def no_view():
+    rows = bcongno.load()
+    if not rows:
+        return NO_HELP, None
+    out, kb = ["💰 Sổ nợ", ""], []
+    for d in ("owe_me", "i_owe"):
+        part = [r for r in rows if r["dir"] == d]
+        if part:
+            out.append(NO_DIR[d])
+            out += [f"  {r['name']}: {bcongno.fmt(r['amount'], r['cur'])}" + (f" — {r['note']}" if r.get("note") else "") for r in part]
+            out.append("")
+            kb += [[InlineKeyboardButton(f"#{r['id']} {r['name']} {bcongno.fmt(r['amount'], r['cur'])}", callback_data=f"no:ed:{r['id']}")] for r in part]
+    for d, label in (("owe_me", "Tổng nợ tôi"), ("i_owe", "Tổng tôi nợ")):
+        tot = {}
+        for r in rows:
+            if r["dir"] == d:
+                tot[r["cur"]] = tot.get(r["cur"], 0) + r["amount"]
+        if tot:
+            out.append(f"{label}: " + " · ".join(bcongno.fmt(v, c) for c, v in tot.items()))
+    out.append("\nBấm một dòng để sửa hoặc tạo việc. Thêm: «Giang nợ 13k» / «nợ Giang 13k».")
+    return "\n".join(out), InlineKeyboardMarkup(kb)
+
+
+async def no_refresh(q):
+    text, kb = no_view()
+    try:
+        await q.edit_message_text(text, reply_markup=kb)
+    except Exception:
+        await q.message.reply_text(text, reply_markup=kb)
+
+
+async def no_add_reply(message, p: dict):
+    row, before = await asyncio.to_thread(bcongno.add, p["name"], p["dir"], p["amount"], p["cur"], p.get("note", ""))
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✏ Sửa / tạo việc", callback_data=f"no:ed:{row['id']}"),
+                                InlineKeyboardButton("🗑 Xóa", callback_data=f"no:del:{row['id']}")]])
+    who = f"{row['name']} nợ tôi" if row["dir"] == "owe_me" else f"Tôi nợ {row['name']}"
+    plus = f" (cộng thêm {bcongno.fmt(p['amount'], p['cur'])}, trước đó {bcongno.fmt(before, row['cur'])})" if before else ""
+    await message.reply_text(f"{NO_DIR[row['dir']][:1]} {who}: {bcongno.fmt(row['amount'], row['cur'])}{plus}"
+                             + (f" — ghi chú: {row['note']}" if row.get("note") else "") + ".\n"
+                             "Tiền tệ đang là " + row["cur"] + ", đổi trong ✏ nếu cần.", reply_markup=kb)
+
+
+async def cmd_no(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    parts = (update.message.text or "").split(None, 1)
+    raw = parts[1].strip() if len(parts) > 1 else ""
+    if not raw:
+        text, kb = no_view()
+        await update.message.reply_text(text, reply_markup=kb)
+        return
+    p = bcongno.parse(raw)
+    if not p and NO_WORDS.search(raw) and re.search(r"\d", raw):  # luật không hiểu → nhờ Gemini tách
+        try:
+            p = await asyncio.to_thread(gemini_debt, raw)
+        except Exception:
+            logging.exception("Gemini hiểu khoản nợ lỗi")
+    if not p:
+        await update.message.reply_text("Chưa hiểu. " + NO_HELP)
+        return
+    await no_add_reply(update.message, p)
+
+
+def no_date_kb(rid: int):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Mai", callback_data=f"no:dt:{rid}:1"),
+                                  InlineKeyboardButton("Cuối tuần", callback_data=f"no:dt:{rid}:we"),
+                                  InlineKeyboardButton("Tuần sau", callback_data=f"no:dt:{rid}:7")],
+                                 [InlineKeyboardButton("✏ Nhập ngày khác", callback_data=f"no:dtx:{rid}:0")]])
+
+
+async def no_make_task(message, rid: int, due: date):
+    r = await asyncio.to_thread(bcongno.get, rid)
+    if not r:
+        await message.reply_text("Khoản nợ này không còn.")
+        return
+    it = await asyncio.to_thread(bviec.add, bcongno.task_text(r, bviec.day_name(due)), due)
+    await message.reply_text(f"📋 Đã tạo việc #{it['id']} vào {LABEL_ICON[it['label']]}: {it['text']}. Xem bằng /viec.")
+
+
+async def on_no(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != OWNER_ID:
+        return
+    _, act, sid, *rest = q.data.split(":")
+    rid = int(sid)
+    r = await asyncio.to_thread(bcongno.get, rid) if rid else None
+    if act != "bk" and not r:
+        await q.message.reply_text("Khoản nợ này không còn.")
+        return
+    if act == "bk":
+        await no_refresh(q)
+    elif act == "ed":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("💱 Đổi tiền tệ", callback_data=f"no:cur:{rid}"),
+                                    InlineKeyboardButton("💲 Sửa số tiền", callback_data=f"no:amt:{rid}")],
+                                   [InlineKeyboardButton("📝 " + ("Sửa ghi chú" if r.get("note") else "Thêm ghi chú"), callback_data=f"no:nt:{rid}"),
+                                    InlineKeyboardButton("📅 " + ("Tạo lịch trả" if r["dir"] == "i_owe" else "Tạo việc nhắc trả"), callback_data=f"no:tk:{rid}")],
+                                   [InlineKeyboardButton("🗑 Xóa khoản này", callback_data=f"no:del:{rid}"),
+                                    InlineKeyboardButton("↩ Quay lại", callback_data="no:bk:0")]])
+        who = f"{r['name']} nợ tôi" if r["dir"] == "owe_me" else f"Tôi nợ {r['name']}"
+        try:
+            await q.edit_message_text(f"✏ {who}: {bcongno.fmt(r['amount'], r['cur'])}", reply_markup=kb)
+        except Exception:
+            await q.message.reply_text(f"✏ {who}: {bcongno.fmt(r['amount'], r['cur'])}", reply_markup=kb)
+    elif act == "cur":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(c + (" ✓" if c == r["cur"] else ""), callback_data=f"no:set:{rid}:{c}") for c in bcongno.CURS]])
+        await q.message.reply_text(f"Chọn tiền tệ cho {r['name']} (đang là {r['cur']}):", reply_markup=kb)
+    elif act == "set" and rest and rest[0] in bcongno.CURS:
+        await asyncio.to_thread(lambda: bcongno.update(rid, cur=rest[0]))
+        await q.message.reply_text(f"Đã đổi: {r['name']} → {bcongno.fmt(r['amount'], rest[0])}.")
+        await no_refresh(q)
+    elif act == "amt":
+        no_wait.clear()
+        no_wait.update(id=rid, field="amt", ts=time.time())
+        await q.message.reply_text(f"Gõ số tiền mới cho {r['name']} (vd 20k, 1,5tr, 200). Gõ «0» để xóa khoản này:")
+    elif act == "nt":
+        no_wait.clear()
+        no_wait.update(id=rid, field="note", ts=time.time())
+        await q.message.reply_text(f"Gõ ghi chú cho {r['name']}" + (f" (hiện là: {r['note']})" if r.get("note") else "") + ". Gõ «xóa» để bỏ ghi chú:")
+    elif act == "tk":
+        await q.message.reply_text(("Chọn ngày trả nợ " if r["dir"] == "i_owe" else f"Chọn ngày nhắc {r['name']} trả ")
+                                   + f"{bcongno.fmt(r['amount'], r['cur'])}:", reply_markup=no_date_kb(rid))
+    elif act == "dtx":
+        no_wait.clear()
+        no_wait.update(id=rid, field="date", ts=time.time())
+        await q.message.reply_text("Gõ ngày (thứ sáu tuần sau, 13/11, mai, mùng 20…):")
+    elif act == "dt" and rest:
+        t0 = date.today()
+        due = t0 + timedelta(days=int(rest[0])) if rest[0].isdigit() else bviec.parse_in_text("cuối tuần")
+        await no_make_task(q.message, rid, due)
+    elif act == "del":
+        await asyncio.to_thread(bcongno.remove, rid)
+        await q.message.reply_text(f"🗑 Đã xóa: {r['name']} {bcongno.fmt(r['amount'], r['cur'])}.")
+
+
 async def post_init(app: Application):
+    app.create_task(viec_loop(app))
     try:  # menu gợi ý khi gõ «/»
         await app.bot.set_my_commands(COMMANDS)
     except Exception as e:
@@ -1335,6 +1968,11 @@ def main():
     app.add_handler(CommandHandler("open", cmd_open))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("memory", cmd_memory))
+    for name, fn in (("viec", cmd_viec), ("xong", cmd_xong)):
+        app.add_handler(CommandHandler(name, fn))
+    app.add_handler(CallbackQueryHandler(on_viec, pattern="^vi:"))
+    app.add_handler(CommandHandler("no", cmd_no))
+    app.add_handler(CallbackQueryHandler(on_no, pattern="^no:"))
     app.add_handler(CallbackQueryHandler(on_mem, pattern="^mem:"))
     app.add_handler(CallbackQueryHandler(on_run, pattern="^run:"))
     app.add_handler(CallbackQueryHandler(on_open, pattern="^opn:"))

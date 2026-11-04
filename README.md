@@ -13,6 +13,8 @@ tìm file / chạy lệnh trên máy với nút **Duyệt** trên Telegram.
 - `/notebook`, `/nbadd`, `/nbsrc`, `/nbnew`: dùng NotebookLM qua `nlm`.
 - `/agent`: Claude (`claude -p`) tìm file bằng lời; chủ bot có phiên liên tục có nhớ và có thể đề xuất lệnh PowerShell, **mỗi lệnh phải bấm ✅ Chạy**.
 - `/memory`: bộ nhớ dài hạn, tự tóm tắt khi đầy.
+- `/viec`: việc cần làm (file Markdown, mở được bằng Obsidian): hạn tự nhiên («thứ sáu tuần sau», «mùng 10»), tự chia Gấp / Quan trọng / Để sau, nhắc 9h sáng, hỏi lại tối, báo cáo tuần Chủ nhật, tích xong và sửa ngay trong Telegram, tự gắn `[[trang môn]]` (cấu hình `wikilink_mon.json`, xem file `.example`). Dán đề bài hoặc gửi ảnh/file kèm `/viec` để bot tự rút việc.
+- `/no` hoặc gõ thẳng «Giang nợ 13k»: sổ nợ tạm (USD/RUB/VND, ghi chú sau dấu chấm), tạo việc trả/nhắc nợ.
 - `/screen`, `/open`, `/status`, `/note` (chỉ chủ).
 - Cập nhật hằng tuần (`bot/weekly.py`, Task Scheduler): lập chỉ mục file mới, báo cáo, nhắn Telegram.
 
