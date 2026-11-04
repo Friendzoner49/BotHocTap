@@ -1,0 +1,16 @@
+python-telegram-bot==22.8
+python-dotenv==1.2.4
+bcrypt==5.0.0
+google-genai==2.34.0
+google-api-python-client==2.201.0
+google-auth-oauthlib==1.5.0
+google-auth-httplib2==0.4.4
+numpy==2.5.4
+pillow==13.0.0
+pypdf==6.21.4
+pypdfium2==5.14.0
+pystray==0.19.5
+python-docx==1.2.0
+python-pptx==1.0.2
+requests==2.34.2
+sentence-transformers==6.2.0
