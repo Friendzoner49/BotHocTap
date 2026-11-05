@@ -1,61 +1,99 @@
-# BotHocTap — trợ lý Telegram ôn bài chạy trên chính máy tính của bạn
+# BotHocTap
 
-Bot Telegram cá nhân: hỏi đáp trên tài liệu học (PDF, Word, PowerPoint, ghi chú…) bằng chỉ mục tìm kiếm chạy cục bộ,
-tìm và gửi file, ghi nhớ hội thoại, giải bài tập thành conspect, hỏi NotebookLM, và (chỉ cho chủ bot) nhờ Claude
-tìm file / chạy lệnh trên máy với nút **Duyệt** trên Telegram.
+[Tiếng Việt](README.vi.md) · English
 
-> Dự án cá nhân, giao diện tiếng Việt. Không có dữ liệu thật trong repo: mật khẩu, khóa API, tài liệu và chỉ mục đều nằm ngoài Git.
+A personal Telegram assistant that runs **on your own PC**. It answers questions about your course material, finds and sends files, manages a to-do list, and (after a password) lets Claude read, edit files and propose commands on the machine — all from your phone, at the lowest token cost it can manage.
 
-## Tính năng chính
-- Hỏi đáp theo tài liệu (embedding cục bộ `BAAI/bge-m3`, trả lời bằng Gemini hoặc `/model claude`).
-- `/find`, nút «Gửi», tải file lớn lên Google Drive (thư mục chỉ định).
-- `/conspect <đề bài>`: giải thích tiếng Việt + conspect tiếng Nga dạng file `.md`.
-- `/notebook`, `/nbadd`, `/nbsrc`, `/nbnew`: dùng NotebookLM qua `nlm`.
-- `/agent`: Claude (`claude -p`) tìm file bằng lời; chủ bot có phiên liên tục có nhớ và có thể đề xuất lệnh PowerShell, **mỗi lệnh phải bấm ✅ Chạy**.
-- `/memory`: bộ nhớ dài hạn, tự tóm tắt khi đầy.
-- `/viec`: việc cần làm (file Markdown, mở được bằng Obsidian): hạn tự nhiên («thứ sáu tuần sau», «mùng 10»), tự chia Gấp / Quan trọng / Để sau, nhắc 9h sáng, hỏi lại tối, báo cáo tuần Chủ nhật, tích xong và sửa ngay trong Telegram, tự gắn `[[trang môn]]` (cấu hình `wikilink_mon.json`, xem file `.example`). Dán đề bài hoặc gửi ảnh/file kèm `/viec` để bot tự rút việc.
-- `/no` hoặc gõ thẳng «Giang nợ 13k»: sổ nợ tạm (USD/RUB/VND, ghi chú sau dấu chấm), tạo việc trả/nhắc nợ.
-- `/screen`, `/open`, `/status`, `/note` (chỉ chủ).
-- Cập nhật hằng tuần (`bot/weekly.py`, Task Scheduler): lập chỉ mục file mới, báo cáo, nhắn Telegram.
+It started as a "study bot" (RAG over lecture notes) and grew into a small assistant. Everything is single-user by design; other people can only use the study features.
 
-## Cần chuẩn bị
-| Thứ | Dùng để | Bắt buộc |
-|---|---|---|
-| Windows 10/11, Python 3.11+ | chạy bot | có |
-| Token bot từ @BotFather, ID Telegram của bạn | bot + nhận diện chủ | có |
-| Khóa Gemini API (miễn phí) | trả lời | có |
-| GPU NVIDIA + torch CUDA | tăng tốc embedding (CPU vẫn chạy, chậm) | không |
-| [Claude Code](https://claude.com/claude-code) đã đăng nhập | `/agent`, `/model claude`, cập nhật tuần | không |
-| `nlm` (notebooklm-mcp-cli) đã `nlm login` | NotebookLM | không |
-| Ollama + `qwen2.5vl` | OCR PDF scan | không |
-| Google Cloud OAuth (`credentials.json`) | Drive (xem `HUONG_DAN_DRIVE.md`) | không |
-| Microsoft Word | tự đổi `.doc` sang PDF khi đẩy lên NotebookLM | không |
+> Status: personal project, used daily by its author. Features added on 2026-11-05 (Claude mode, session picker, whole-drive file search, new menu) were tested with scripts but **not yet on a real Telegram chat**.
 
-## Cài trên máy mới
-1. Cài Python, Git. Tải repo: `git clone <địa-chỉ-repo> BotHocTap` rồi `cd BotHocTap`.
-2. Tạo môi trường và cài thư viện:
-   ```
-   python -m venv .venv
-   .venv\Scripts\pip install -r requirements.txt
-   ```
-   Có GPU NVIDIA: cài torch CUDA từ https://pytorch.org (chọn bản CUDA phù hợp) **trước** bước `pip install -r`.
-3. Chép `.env.example` thành `.env` và điền (token, ID, khóa Gemini, `COURSE_DIR`…). `.env` không bao giờ đưa lên Git.
-4. Đặt mật khẩu cho người dùng khác: chạy `set_password.bat` (chủ bot không cần mật khẩu).
-5. Lập chỉ mục tài liệu: chạy `index_course.bat` (lần đầu tải model bge-m3 ~2 GB, sau đó chạy offline).
-6. Chạy bot: `run_bot.bat` (hoặc `.venv\Scripts\python.exe bot\tray.py` để có biểu tượng khay hệ thống).
-7. (Tùy chọn) Drive: làm theo `HUONG_DAN_DRIVE.md`. NotebookLM: `nlm login`. Claude: `claude` rồi đăng nhập.
-8. (Tùy chọn) Cập nhật hằng tuần: tạo tác vụ Task Scheduler chạy `.venv\Scripts\python.exe -X utf8 bot\weekly.py` thứ Hai 15:00.
+## Design goals
 
-## Mang dữ liệu cũ sang máy mới
-Những thứ này **không** nằm trong Git; chép tay (USB/ổ mạng riêng tư) nếu muốn giữ nguyên:
-- `.env`, `password.json` — bí mật, đừng gửi qua kênh công khai.
-- `credentials.json` (Google Cloud). `drive_token.json` có thể bỏ, chạy `dang_nhap_drive.bat` đăng nhập lại.
-- `index_local\` và `ocr_cache\` — chép để khỏi lập chỉ mục và OCR lại (nhớ giữ cùng đường dẫn tài liệu `COURSE_DIR`, nếu khác thì chạy lại `index_course.bat`).
-- `memory\` — bộ nhớ của bot. `questions.jsonl`, `weekly_state.json` — nhật ký cho báo cáo tuần.
-- Thư mục tài liệu (`COURSE_DIR`) và vault wiki (`WIKI_DIR`) nếu dùng.
+1. **Few Claude tokens.** Gemini (free tier) answers by default; local models do embeddings and OCR; Claude is used only when you explicitly enter Claude mode, in the weekly wiki job, or in `/capnhat`.
+2. **Accurate.** Answers are grounded in retrieved chunks of your own files, with sources and a "how well did it match" line.
+3. **Can act on the PC, safely.** A phone is the weakest link, so powerful modes need a password, commands need a button press, and secrets are blocked.
+4. **Runs without Claude.** If the Claude subscription lapses, the bot keeps working (Gemini + local index + local data files).
 
-## Bảo mật (đọc trước khi dùng `/agent`)
-- Chỉ ID Telegram trong `MY_TELEGRAM_ID` là chủ. Người lạ không nhận được phản hồi.
-- Lệnh trên máy chỉ chạy sau khi chủ bấm ✅ Chạy; lệnh chạy được mọi nơi, hãy đọc kỹ trước khi duyệt.
-- Dùng `claude -p` bằng gói đăng ký của chính bạn là dùng cá nhân; không cho người khác dùng đường này.
-- Giữ `.env`, `password.json`, `credentials.json`, `drive_token.json` ngoài Git (đã nằm trong `.gitignore`).
+## How it works
+
+```
+Telegram ──► bot (python-telegram-bot, long polling, runs in the tray on your PC)
+              │
+              ├─ login / owner check ───── strangers get silence
+              ├─ active mode? (checked FIRST, before any guessing)
+              │     password prompt → /capnhat session → Claude mode → /notebook mode → "✍" pending argument
+              ├─ natural-language rules: debts ("Giang nợ 13k"), to-dos, "find me file …"
+              └─ otherwise: question answering (RAG)
+                    question ─► local index (bge-m3 embeddings, GPU) ─► top chunks
+                            ─► Gemini writes the answer from those chunks only
+                            ─► reply + "🔎 N chunks, nearest files, match: high/medium/low"
+```
+
+### Question answering (RAG)
+`index_course.bat` splits your course files (PDF, DOCX, PPTX, text, code; scanned PDFs through OCR) into chunks and embeds them locally with BAAI/bge-m3 into `index_local/`. The Obsidian wiki is indexed too. A question is embedded, the nearest chunks are retrieved, and Gemini answers using only those chunks and cites file and page. Each answer ends with a short explanation line so you can judge whether the retrieval was any good.
+
+### Finding and opening files
+`kfind.py` keeps an in-memory **name index** (built in a background thread) of the course folder and, for the owner, the whole drive. Search ignores case and diacritics ("tu duy he thong" finds "tư duy hệ thống"). No exact hit → closest names are suggested. Secrets (`.env`, `password.json`, tokens, keys) never appear; other logged-in users only see the course folder. `/open` refuses runnable file types.
+
+### Claude mode (owner only)
+`/model claude` links the bot to the newest saved Claude Code session of this project; `/agent` lists every session on the machine (sessions outside the bot's drive are shown but cannot be joined) or starts a new one. You type the **password every time you enter**; the message holding it is deleted. In the mode every normal message goes to that session through `claude -p --resume`. Claude gets Read/Glob/Grep/Edit/Write on the drive but **no shell tool**: a command can only be proposed as a `CHẠY:` line, which the bot shows with ✅ Run / ❌ Cancel buttons. Reading secrets and editing the bot's frozen data files are denied by permission rules. The mode expires after 30 idle minutes.
+
+Caveats: typing in VS Code and Telegram on the *same* session at the same moment makes the history diverge; and every message re-sends the whole session history, so long sessions cost more tokens (compact first).
+
+### NotebookLM
+`/notebook` picks a notebook; then every normal message is sent **verbatim** to that notebook's own chat (through the `nlm` CLI), so you can compare with the web UI. `/nbsrc` lists its sources.
+
+### Other parts
+| Part | What it does |
+|---|---|
+| `/viec` (`viec.py`) | To-do list kept as a Markdown file in the wiki; urgency labels from deadlines, 9:00 reminder, weekly report, paste an assignment (text, photo, file) and Gemini extracts tasks. |
+| debts (`congno.py`) | Natural-language debt book ("Giang nợ 13k", "Giang trả 5k"), local JSON, deliberately never written to the wiki or Git. |
+| `/conspect` (`conspect.py`) | Explanation + Russian-language study notes from an assignment and the indexed books. |
+| `/capnhat` | A session: Claude ingests articles dropped in the wiki inbox, lints the wiki every 10 sources, **asks you questions in the chat and remembers the answers**, then you press "Done" to commit and re-index. |
+| `weekly.py` | Monday 15:00 Task Scheduler job: ingests new course files into the wiki, summarises unanswered questions. |
+| `memory.py` | Long-term memory of the owner's Q&A, auto-summarised at 10 MB. |
+| Drive | Upload a found file to Google Drive (`drive.py`). |
+
+## Security model
+
+| Who | Can |
+|---|---|
+| Stranger | nothing, the bot stays silent |
+| Logged in with password (30 min) | study Q&A, `/find` and file download in the course folder, `/conspect`, Drive, read-only `/agent` |
+| Owner (Telegram ID in `.env`) | everything above on the whole drive, `/open`, `/screen`, `/status`, `/notebook`, debts, to-dos, `/capnhat` |
+| Owner + password (Claude mode) | Claude edits files on the drive; commands still need a ✅ press |
+
+Other rules: `CLAUDE*.md`, personal data and the index are never committed; the `.env` file holds all keys and paths; text from files and web pages is treated as data, never as instructions.
+
+## Setup
+
+Windows 10/11, Python 3.12+, an NVIDIA GPU is recommended for embeddings (CPU works, slowly).
+
+```
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+copy .env.example .env        # fill in the values
+set_password.bat              # password for other devices and Claude mode
+index_course.bat              # build the local index
+run_bot.bat                   # or: .venv\Scripts\python bot\tray.py  (system tray)
+```
+Optional: `claude` CLI (Claude mode, `/capnhat`, weekly job), `nlm` CLI (NotebookLM), Ollama (local conspect model), Google Drive credentials (`HUONG_DAN_DRIVE.md`).
+
+## Commands
+`/menu` opens grouped buttons (the blue Menu button lists the same groups). "▶" items run at once and then offer next-step buttons; "✍" items wait for your next message as their argument. `/help` is generated from the same menu, so it never drifts.
+
+## Layout
+```
+bot/main.py      handlers, modes, menu          bot/kfind.py     file-name index and fuzzy suggestions
+bot/rag.py       index + search                 bot/sessions.py  saved Claude sessions (read only)
+bot/viec.py      to-dos                         bot/congno.py    debt book
+bot/conspect.py  study notes                    bot/wikiops.py   shared wiki prompts
+bot/weekly.py    weekly job                     bot/tray.py      system-tray launcher
+```
+
+## Known limits
+- Windows only (uses `os.startfile`, PowerShell, Task Scheduler); not tested on macOS or Linux.
+- Gemini free-tier limits apply; the bot says so in plain words when it is throttled.
+- Claude mode depends on the `claude` CLI and on the Claude Code session format.
+- Single owner; there is no multi-user database.

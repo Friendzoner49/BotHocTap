@@ -82,7 +82,7 @@ def main():
     notify(msg)
     if WIKI_DIR is None:  # không có vault Obsidian → chỉ lập chỉ mục + báo cáo, không gọi Claude
         return
-    inbox = sorted((WIKI_DIR / "raw" / "inbox").glob("note-*.md"))  # ghi chú nhanh từ /note
+    inbox = sorted((WIKI_DIR / "raw" / "inbox").glob("*.md"))  # mọi bài/ghi chú trong inbox (Web Clipper, Obsidian, /capnhat <nội dung>)
     if (old is not None and (new or changed or miss)) or inbox:
         texts = ROOT / "reports" / f"{today}-texts"
         texts.mkdir(exist_ok=True)
@@ -102,14 +102,18 @@ def main():
             (texts / f"{i:03d}.txt").write_text(f"FILE: {rel}\n{body}", encoding="utf-8")
             listing.append(f"- {i:03d}.txt = {rel}")
         for j, nf in enumerate(inbox, 1):
-            (texts / f"note-{j:02d}.txt").write_text(f"GHI CHÚ NHANH ({nf.name}):\n" + nf.read_text(encoding="utf-8"), encoding="utf-8")
-            listing.append(f"- note-{j:02d}.txt = ghi chú nhanh của chủ (từ /note)")
+            (texts / f"inbox-{j:02d}.txt").write_text(f"BÀI/GHI CHÚ TRONG INBOX ({nf.name}):\n" + nf.read_text(encoding="utf-8"), encoding="utf-8")
+            listing.append(f"- inbox-{j:02d}.txt = bài/ghi chú trong raw/inbox ({nf.name})")
         (texts / "_DANH_SACH.txt").write_text("\n".join(listing), encoding="utf-8")
         if run_claude(ROOT / "reports" / f"{today}.md", texts):
             done = WIKI_DIR / "raw" / "done"
             done.mkdir(exist_ok=True)
             for nf in inbox:  # đã đưa vào wiki → chuyển sang done (đúng quy ước vault)
-                nf.replace(done / nf.name)
+                dest = done / nf.name
+                if dest.exists():
+                    dest = done / f"{nf.stem}-{time.strftime('%Y%m%d%H%M%S')}{nf.suffix}"
+                nf.replace(dest)
+            lint_after(len(inbox) + len(new) + len(changed))
 
 
 CLAUDE_PROMPT = """Dùng skill cap-nhat-wiki-tuan. Báo cáo tuần: {report}. Thư mục chữ đã trích: {texts}. Chạy tự động, không có người trả lời giữa chừng."""
@@ -138,6 +142,33 @@ def run_claude(report: Path, texts: Path):
     except Exception as e:
         notify(f"Không chạy được Claude Code ({type(e).__name__}). Bạn có thể gọi tay: «ingest tài liệu mới vào wiki».")
         return False
+
+
+def lint_after(n: int):
+    """Cộng n nguồn vừa nạp vào bộ đếm chung với /capnhat; đủ 10 nguồn thì tự kiểm tra wiki (lint)."""
+    import shutil
+    import subprocess
+    import wikiops
+    st = wikiops.load()
+    st["since"] = st.get("since", 0) + n
+    if st["since"] >= wikiops.LINT_EVERY:
+        exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
+        try:
+            r = subprocess.run([exe, "-p", wikiops.LINT_PROMPT, "--model", "sonnet", "--permission-mode", "acceptEdits",
+                                "--allowedTools", "Read", "Glob", "Grep", "Edit", "Write",
+                                "--settings", '{"disableAllHooks":true}'],
+                               cwd=WIKI_DIR, capture_output=True, text=True, encoding="utf-8", timeout=3 * 3600)
+            if r.returncode == 0:
+                subprocess.run(["git", "add", "-A"], cwd=WIKI_DIR)
+                subprocess.run(["git", "commit", "-m", f"lint: kiểm tra wiki hằng tuần {today}\n\n"
+                                "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"], cwd=WIKI_DIR)
+                st["since"] = 0
+                notify("Đã kiểm tra wiki (đủ 10 nguồn):\n" + (r.stdout or "").strip()[-1500:])
+            else:
+                notify("Kiểm tra wiki bị lỗi, sẽ thử lại lần sau. Hoặc gõ «/capnhat lint» trên Telegram.")
+        except Exception as e:
+            notify(f"Không chạy được kiểm tra wiki ({type(e).__name__}). Gõ «/capnhat lint» trên Telegram để thử lại.")
+    wikiops.save(st)
 
 
 def notify(text):

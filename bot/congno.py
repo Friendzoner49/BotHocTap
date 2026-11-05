@@ -17,7 +17,20 @@ NOT_NAME = re.compile(rf"^(?:{ME}|mày|ai|nó|hắn|ổng|bả|ảnh|chị ấy|
 LEND = re.compile(rf"^cho\s+(?P<name>.+?)\s+(?:vay|mượn)\s+(?P<amt>\d.*)$", re.I)              # cho Minh vay 80k → Minh nợ tôi
 BORROW = re.compile(rf"^(?P<name>.+?)\s+cho\s+{ME}\s+(?:vay|mượn)\s+(?P<amt>\d.*)$", re.I)     # Minh cho tao vay 80k → tôi nợ Minh
 OWE_ME = re.compile(rf"^(?P<name>.+?)\s+{VERB}\s+(?:{ME}\s+)?(?P<amt>\d.*)$", re.I)           # Minh nợ tao 80k / Minh vay 80k
-I_OWE = re.compile(rf"^(?:(?:{ME})\s+)?{VERB}\s+(?P<name>.+?)\s+(?P<amt>\d.*)$", re.I)        # tao nợ Minh 80k / nợ Minh 80k / vay Minh 80k
+ASP = r"(?:\s+(?:đã|vừa|mới|đang|sẽ))*"
+I_OWE = re.compile(rf"^(?:(?:{ME}){ASP}\s+)?{VERB}\s+(?P<name>.+?)\s+(?P<amt>\d.*)$", re.I)        # tao nợ Minh 80k / nợ Minh 80k / vay Minh 80k
+
+
+ASPECT = re.compile(r"\s+(?:đã|vừa|mới|có|đang|sẽ|vừa mới|mới vừa)$", re.I)   # «Vi đã trả…» → tên là «Vi»
+SUSPECT = re.compile(r"\b(?:đã|vừa|mới|đang|sẽ|chưa|rồi|xong|trả|hôm|qua|nay|nợ|vay|mượn|thiếu)\b", re.I)  # tên chứa từ này = hiểu nhầm câu → để Gemini xử lý
+
+
+HONOR = re.compile(r"^(?:anh|chị|em|bạn|cô|chú|bác|ông|bà|cậu|dì|thím|thằng|con|bé)\s+", re.I)
+
+
+def key(name: str) -> str:
+    """Tên để so khớp: bỏ xưng hô đầu («anh Tân» = «Tân»), không phân biệt hoa thường."""
+    return HONOR.sub("", name.strip()).casefold()
 
 
 def parse_amount(s: str):
@@ -57,7 +70,7 @@ def parse(text: str):
         if m:
             a = parse_amount(m.group("amt"))
             name = m.group("name").strip(" ,.:;")
-            if a and a[0] > 0 and name and len(name) <= 40 and not NOT_NAME.match(name):
+            if a and a[0] > 0 and name and len(name) <= 40 and not NOT_NAME.match(name) and not SUSPECT.search(name):
                 return {"name": name, "dir": direction, "amount": a[0], "cur": a[1] or "VND", "note": note}
     return None
 
@@ -76,7 +89,7 @@ def save(rows: list):
 def add(name: str, direction: str, amount: int, cur: str = "VND", note: str = "") -> tuple:
     """Cộng dồn nếu đã có cùng người + chiều + tiền tệ. Trả (dòng, số tiền trước đó hoặc 0)."""
     rows = load()
-    same = next((r for r in rows if r["name"].casefold() == name.casefold() and r["dir"] == direction and r["cur"] == cur), None)
+    same = next((r for r in rows if key(r["name"]) == key(name) and r["dir"] == direction and r["cur"] == cur), None)
     if same:
         before = same["amount"]
         same["amount"] += amount
@@ -122,3 +135,52 @@ def task_text(r: dict, day: str) -> str:
     if r["dir"] == "i_owe":
         return f"Trả nợ {r['name']} {money} vào {day}"
     return f"Nhắc {r['name']} trả {money} vào {day}"
+
+
+ALL = r"(?:hết|xong|đủ|sạch)"
+I_PAY = re.compile(rf"^(?:(?:{ME}){ASP}\s+)?trả\s+(?:nợ\s+)?(?P<name>.+?)\s+(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)       # tao trả Giang 5k / trả Giang hết
+PAY_ME = re.compile(rf"^(?P<name>.+?)\s+trả\s+(?:nợ\s+)?(?:{ME}\s+)?(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)           # Giang trả tao 5k / Giang trả hết
+
+
+def parse_pay(text: str):
+    """«Giang trả 5k» → {'name','dir':'owe_me','amount':5000,'cur':None}; «tao trả Giang hết» → dir 'i_owe', amount None (= trả hết).
+    Chỉ nhận dạng cú pháp; việc khớp với khoản nợ có thật do pay() kiểm tra."""
+    t, _ = split_note(text.strip())
+    if len(t) > 80:
+        return None
+    for rx, direction in ((I_PAY, "i_owe"), (PAY_ME, "owe_me")):
+        m = rx.match(t)
+        if not m:
+            continue
+        name = ASPECT.sub("", m.group("name").strip(" ,.:;"))
+        if not name or len(name) > 40 or NOT_NAME.match(name) or SUSPECT.search(name):
+            continue
+        amt = m.group("amt").strip()
+        if re.match(ALL, amt, re.I):
+            return {"name": name, "dir": direction, "amount": None, "cur": None}
+        a = parse_amount(amt)
+        if a and a[0] > 0:
+            return {"name": name, "dir": direction, "amount": a[0], "cur": a[1]}
+    return None
+
+
+def pay(p: dict):
+    """Trừ nợ. Trả (trạng thái, dữ liệu): 'none' (không có khoản này), 'many' (nhiều tiền tệ, cần nói rõ; dữ liệu = danh sách đơn vị),
+    'paid' (đã trả hết, dòng bị xóa; dữ liệu = (dòng, trả dư)), 'left' (còn nợ; dữ liệu = (dòng, số đã trả))."""
+    rows = [r for r in load() if key(r["name"]) == key(p["name"]) and r["dir"] == p["dir"]]
+    if p.get("cur"):
+        rows = [r for r in rows if r["cur"] == p["cur"]]
+    if not rows:
+        return "none", None
+    if len(rows) > 1 and p["amount"] is not None:
+        return "many", [r["cur"] for r in rows]
+    if p["amount"] is None:  # trả hết: xóa mọi khoản khớp
+        for r in rows:
+            remove(r["id"])
+        return "paid", (rows[0], 0)
+    r = rows[0]
+    if p["amount"] >= r["amount"]:
+        remove(r["id"])
+        return "paid", (r, p["amount"] - r["amount"])
+    update(r["id"], amount=r["amount"] - p["amount"])
+    return "left", (get(r["id"]), p["amount"])

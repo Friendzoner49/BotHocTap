@@ -48,6 +48,11 @@ def iter_all(course_dir: Path):
         if root.exists():
             for p in sorted(root.rglob("*.md")):
                 yield p, name, "wiki/" + p.relative_to(root).as_posix()
+            # luật và hướng dẫn của kho (nằm ngoài wiki\) để bot trả lời đúng về ingest/query/lint
+            for fn, shown in (("CLAUDE.md", "wiki/_schema-CLAUDE.md"), ("HUONG_DAN.md", "wiki/_huong-dan.md")):
+                f = root.parent / fn
+                if f.exists():
+                    yield f, name, shown
 
 
 def subject_of(course_dir: Path, p: Path) -> str:
@@ -182,4 +187,4 @@ class Index:
             mask = np.array([c["subject"] == subject for c in self.chunks])
             scores = np.where(mask, scores, -1)
         top = np.argsort(-scores)[:k]
-        return [self.chunks[i] for i in top if scores[i] > 0]
+        return [dict(self.chunks[i], score=float(scores[i])) for i in top if scores[i] > 0]
