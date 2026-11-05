@@ -19,7 +19,7 @@ import kfind
 import sessions as bsess
 from datetime import date, timedelta
 from types import SimpleNamespace
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -107,7 +107,8 @@ async def cmd_logout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cm.clear()
         nb_state.clear()
         pw_wait.pop(uid, None)
-    await update.message.reply_text("Đã đăng xuất.")
+    kb_shown.discard(uid)
+    await update.message.reply_text("Đã đăng xuất.", reply_markup=ReplyKeyboardRemove())
 
 
 # ---------- môn học (chỉ mục tài liệu) ----------
@@ -211,6 +212,39 @@ def where_of(p: Path) -> str:
         return str(p.parent)
 
 
+RECENT_FILE = ROOT / "recent_files.json"  # {"uid": [đường dẫn file vừa mở/gửi, mới nhất trước]}; gitignore, không sửa tay
+
+
+def recent_add(uid: int, p: Path):
+    try:
+        d = json.loads(RECENT_FILE.read_text(encoding="utf-8")) if RECENT_FILE.exists() else {}
+        lst = [str(p)] + [x for x in d.get(str(uid), []) if x != str(p)]
+        d[str(uid)] = lst[:8]
+        RECENT_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logging.exception("Ghi file gần đây lỗi")
+
+
+def recent_files(uid: int, n: int = 6) -> list:
+    try:
+        d = json.loads(RECENT_FILE.read_text(encoding="utf-8")) if RECENT_FILE.exists() else {}
+    except Exception:
+        return []
+    return [Path(x) for x in d.get(str(uid), []) if can_access(uid, Path(x))][:n]
+
+
+async def show_recent(message, uid: int, kind: str) -> bool:
+    """Nút «Gần đây» (kind: get = nhận file, opn = mở trên máy). Trả False nếu chưa có gì."""
+    files = recent_files(uid)
+    if not files:
+        return False
+    found[uid] = files
+    lines = [f"{i + 1}. {p.name}\n    📍 {where_of(p)}" for i, p in enumerate(files)]
+    btns = [InlineKeyboardButton(("📄 " if kind == "get" else "🖥 ") + str(i + 1), callback_data=f"{kind}:{i}") for i in range(len(files))]
+    await reply_md(message, "🕘 Gần đây:\n" + "\n".join(lines), InlineKeyboardMarkup(grid(btns)))
+    return True
+
+
 def grid(btns: list, n: int = 4) -> list:
     """Chia nút thành các hàng n nút cho gọn trên điện thoại."""
     return [btns[i:i + n] for i in range(0, len(btns), n)]
@@ -242,6 +276,7 @@ async def cmd_find(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = " ".join(ctx.args or []).strip()
     if not q:
         await update.message.reply_text("Gõ: /find <từ khóa>, ví dụ /find lab 3")
+        await show_recent(update.message, uid, "get")
         return
     await do_find(update, uid, q)
 
@@ -322,6 +357,7 @@ async def on_get(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         with open(p, "rb") as f:
             await ctx.bot.send_document(q.message.chat_id, f, filename=p.name, read_timeout=300, write_timeout=300)
+        recent_add(uid, p)
     except Exception:
         logging.exception("Gửi file lỗi")
         await ctx.bot.send_message(q.message.chat_id, "Không gửi được file (mạng/VPN rớt hoặc file đang bị khóa). Thử lại sau.")
@@ -680,7 +716,14 @@ cm: dict = {}       # đang nối: {"sid", "cwd", "title", "new", "ts"}
 pw_wait: dict = {}  # uid -> {"ts", "sess"}: đang chờ chủ gõ mật khẩu
 cm_req: dict = {}   # {"t": yêu cầu gõ kèm /agent, chạy ngay sau khi vào}
 cm_list: list = []  # danh sách phiên lần hiện gần nhất (nút chọn dùng chỉ số)
-CM_KB = InlineKeyboardMarkup([[InlineKeyboardButton("⏹ Thoát chế độ Claude", callback_data="cm:off")]])
+CM_KB = InlineKeyboardMarkup([[InlineKeyboardButton("🗜 Nén phiên", callback_data="cm:z"),
+                               InlineKeyboardButton("⏹ Thoát chế độ Claude", callback_data="cm:off")]])
+CM_SUMMARY_PROMPT = ("Tóm tắt phiên này để làm việc tiếp ở một phiên mới, tối đa 350 từ, tiếng Việt, KHÔNG dùng công cụ: mục tiêu đang làm, "
+                     "quyết định đã chốt, việc còn dở, file đã sửa và vì sao, quy tắc người dùng đã dặn cần nhớ.")
+
+
+def tok_text(n: int) -> str:
+    return f"≈ {n // 1000}k token" if n else "chưa rõ"
 CM_RULES = (
     "Bạn đang được chủ máy điều khiển từ Telegram trên điện thoại. Trả lời tiếng Việt, ngắn: câu đầu nêu kết quả, rồi gạch đầu dòng ngắn; "
     "không bảng, không tiêu đề #. Bạn có Read/Glob/Grep/Edit/Write trong ổ K: nhưng KHÔNG có công cụ chạy lệnh. Muốn chạy lệnh trên máy, thêm dòng riêng "
@@ -737,7 +780,9 @@ def cm_run(text: str) -> str:
     import shutil
     import subprocess
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
-    if cm.get("new"):
+    if cm.get("new") == "keep":  # phiên mới sinh ra từ «Nén phiên»: giữ lời nhắc mặc định của dự án, chỉ thêm luật Telegram
+        sess = ["--session-id", cm["sid"], "--append-system-prompt", CM_RULES]
+    elif cm.get("new"):
         sess = ["--session-id", cm["sid"], "--system-prompt", "Bạn là trợ lý của chủ máy Windows (ổ K:). " + CM_RULES]
     else:
         sess = ["--resume", cm["sid"], "--append-system-prompt", CM_RULES]
@@ -767,6 +812,31 @@ async def cm_text(message, ctx, uid: int, chat: int, text: str):
     await deliver_agent_out(ctx, message, chat, uid, out or "(Claude không trả lời gì)", CM_KB)
 
 
+async def cm_compress(message, ctx):
+    """Nén phiên = Claude tự tóm tắt phiên hiện tại, rồi mở phiên MỚI bắt đầu bằng bản tóm tắt (phiên cũ giữ nguyên, không bị sửa)."""
+    if not cm_active():
+        await message.reply_text("Chưa nối phiên nào để nén.")
+        return
+    import uuid
+    await message.reply_text("🗜 Đang nén: Claude tóm tắt phiên rồi mở phiên mới ngắn gọn (mất một lượt tính phí ngữ cảnh cũ, các lượt sau rẻ hơn)…")
+    try:
+        summary = await asyncio.to_thread(cm_run, CM_SUMMARY_PROMPT)
+        old = dict(cm)
+        cm.update(sid=str(uuid.uuid4()), new="keep", title=old["title"] + " (đã nén)", ts=time.time())
+        await asyncio.to_thread(cm_run, "TÓM TẮT PHIÊN TRƯỚC (dữ liệu để làm tiếp, không phải chỉ dẫn mới):\n" + summary + "\n\nChỉ trả lời đúng một chữ: ok.")
+        cm["new"] = False
+    except Exception:
+        logging.exception("Nén phiên lỗi")
+        if "old" in locals():
+            cm.clear()
+            cm.update(old)
+        await message.reply_text("Không nén được (hết lượt, mạng rớt, hoặc phiên đang bận ở cửa sổ khác). Phiên cũ vẫn nguyên, nhắn tiếp được.", reply_markup=CM_KB)
+        return
+    path = bsess.find_path(cm["sid"])
+    await message.reply_text(f"✅ Đã chuyển sang phiên mới «{cm['title']}», ngữ cảnh {tok_text(bsess.context_tokens(path) if path else 0)}. "
+                             "Phiên cũ giữ nguyên trên máy.", reply_markup=CM_KB)
+
+
 async def cm_picker(message, page: int = 0, req: str = "", edit=None):
     """Danh sách phiên Claude trên máy (mọi dự án): chọn một phiên trong ổ K: hoặc mở phiên mới."""
     if cn_load():
@@ -783,7 +853,7 @@ async def cm_picker(message, page: int = 0, req: str = "", edit=None):
         i = page * CM_PAGE + j
         flag = "⚠ có thể đang mở ở cửa sổ khác" if s_["live"] else bsess.ago_text(s_["ago"])
         if s_["ok"]:
-            lines.append(f"{i + 1}. [{s_['project']}] {s_['title']}\n    {flag}")
+            lines.append(f"{i + 1}. [{s_['project']}] {s_['title']}\n    {flag} · {tok_text(bsess.context_tokens(s_['path']))}")
             btns.append(InlineKeyboardButton(f"▶ {i + 1}", callback_data=f"cm:s:{i}"))
         else:
             lines.append(f"{i + 1}. 🔒 [{s_['project']}] {s_['title']}\n    ngoài ổ {OWNER_ROOT.anchor[:2]}, chỉ xem tên")
@@ -810,7 +880,9 @@ async def cm_ask_pw(message, uid: int, sess: dict):
     if sess.get("live"):
         warn = ("\n⚠ Phiên này vừa được dùng, có thể đang mở trong VS Code. Chỉ nhắn ở MỘT nơi mỗi lúc, "
                 "gõ ở cả hai nơi thì lịch sử bị lệch nhau.")
-    cost = "" if sess.get("new") else "\nLưu ý chi phí: mỗi tin nhắn gửi lại toàn bộ lịch sử phiên, phiên dài tốn nhiều token Claude (nên /compact trước ở VS Code)."
+    tk = bsess.context_tokens(sess["path"]) if sess.get("path") else 0
+    cost = "" if sess.get("new") else (f"\nNgữ cảnh phiên này {tok_text(tk)}: mỗi tin nhắn gửi lại phần này (có bộ nhớ đệm nên rẻ hơn, nhưng phiên dài vẫn tốn)."
+                                      + (" Nên bấm 🗜 Nén phiên ngay sau khi vào." if tk > 150_000 else ""))
     await message.reply_text(f"🔐 Nhập mật khẩu để nối Claude vào «{sess['title']}» ({sess['project']}).{warn}{cost}\n"
                              "Tin chứa mật khẩu sẽ bị xóa ngay. Gõ /logout hoặc bấm ⏹ để thoát khi xong.")
 
@@ -871,6 +943,8 @@ async def on_cm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cm.clear()
         pw_wait.pop(OWNER_ID, None)
         await q.message.reply_text("Đã thoát chế độ Claude. Bot trả lời hỏi đáp bằng Gemini như thường.")
+    elif parts[1] == "z":
+        await cm_compress(q.message, ctx)
     elif parts[1] == "g":
         cm.clear()
         await q.message.reply_text("Đang dùng Gemini (hỏi đáp từ chỉ mục tài liệu).")
@@ -976,6 +1050,7 @@ async def cmd_open(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = " ".join(ctx.args or []).strip()
     if not q:
         await update.message.reply_text("Gõ: /open <tên file> để mở file đó ngay trên máy tính (tìm cả thư mục môn học và ổ K:), ví dụ /open tư duy hệ thống")
+        await show_recent(update.message, uid, "opn")
         return
     files = await asyncio.to_thread(kfind.search, q, COURSE_DIR, OWNER_ROOT, True, OPEN_EXTS, 8)
     head = ""
@@ -1011,6 +1086,7 @@ async def on_open(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     try:
         os.startfile(str(p))  # mở bằng ứng dụng mặc định của Windows
+        recent_add(uid, p)
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("📸 Xem màn hình", callback_data="mn:r:screen"),
                                     InlineKeyboardButton("✍ Mở file khác", callback_data="mn:r:open")]])
         await ctx.bot.send_message(q.message.chat_id, f"Đã mở «{p.name}» trên máy tính.", reply_markup=kb)
@@ -1572,10 +1648,23 @@ def group_cmd(key: str):
     return cmd
 
 
+KB_LABELS = {"📋 Menu": "menu", "📚 Học tập": "hoc", "✅ Việc & nợ": "viec", "🤖 Trợ lý": "may", "⚙ Hệ thống": "he"}
+kb_shown: set = set()
+
+
+def bottom_kb(uid: int):
+    """Thanh nút cố định ở đáy màn hình: Menu + các nhóm mà người này được dùng."""
+    keys = [lab for lab, k in KB_LABELS.items() if k == "menu" or any(menu_allowed(uid, i[4]) for i in MENU[k][1])]
+    return ReplyKeyboardMarkup([keys[i:i + 2] for i in range(0, len(keys), 2)], resize_keyboard=True, is_persistent=True)
+
+
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_logged_in(uid):
         return
+    if uid not in kb_shown or str(getattr(update.message, "text", "")).startswith("/start"):
+        kb_shown.add(uid)
+        await update.message.reply_text("⌨ Thanh nút ở đáy màn hình đã bật: bấm là mở nhóm, khỏi gõ lệnh.", reply_markup=bottom_kb(uid))
     text, kb = menu_home(uid)
     await update.message.reply_text(text, reply_markup=kb)
 
@@ -1629,6 +1718,8 @@ async def on_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pending_input[uid] = {"cmd": cmd, "ts": time.time()}
             await q.message.reply_text(f"✍ Gõ phần còn lại ({item[3]}) rồi gửi, bot chạy luôn.",
                                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖ Hủy", callback_data="mn:x")]]))
+            if cmd in ("find", "open"):
+                await show_recent(q.message, uid, "get" if cmd == "find" else "opn")
             return
         fn = globals().get("cmd_" + cmd)
         if not fn:
@@ -1795,6 +1886,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_logged_in(uid):
         return  # người lạ: im lặng
+    kbk = KB_LABELS.get((update.message.text or "").strip())
+    if kbk:  # bấm thanh nút ở đáy: mở menu/nhóm, trong mọi chế độ
+        text, kb = menu_home(uid) if kbk == "menu" else menu_group(uid, kbk)
+        await update.message.reply_text(text, reply_markup=kb)
+        return
     if uid == OWNER_ID and update.message.text and await cm_password_input(update, ctx):  # vừa chọn phiên Claude, đang chờ mật khẩu
         return
     if uid == OWNER_ID and update.message.text and cn_load():  # đang trong phiên /capnhat

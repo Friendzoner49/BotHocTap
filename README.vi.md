@@ -54,6 +54,7 @@ Lưu ý: gõ ở VS Code và Telegram trên *cùng một* phiên cùng lúc sẽ
 | `weekly.py` | Việc thứ Hai 15:00 (Task Scheduler): nạp file môn mới vào wiki, tổng hợp câu hỏi chưa trả lời được. |
 | `memory.py` | Bộ nhớ dài hạn các câu hỏi-đáp của chủ, tự tóm tắt khi đạt 10 MB. |
 | Drive | Đưa file tìm được lên Google Drive (`drive.py`). |
+| Tiện dùng | Thanh nút cố định ở đáy (Menu + các nhóm), nút «Gần đây» cho `/find` và `/open`, hiện cỡ phiên trước khi nối chế độ Claude và nút 🗜 tóm tắt phiên sang phiên mới. |
 
 ## Mô hình an toàn
 

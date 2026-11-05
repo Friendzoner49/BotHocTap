@@ -54,6 +54,7 @@ Caveats: typing in VS Code and Telegram on the *same* session at the same moment
 | `weekly.py` | Monday 15:00 Task Scheduler job: ingests new course files into the wiki, summarises unanswered questions. |
 | `memory.py` | Long-term memory of the owner's Q&A, auto-summarised at 10 MB. |
 | Drive | Upload a found file to Google Drive (`drive.py`). |
+| Quality of life | A persistent bottom keyboard (Menu + groups), "Recent" buttons for `/find` and `/open`, session size shown before joining Claude mode and a 🗜 button that summarises the session into a fresh one. |
 
 ## Security model
 

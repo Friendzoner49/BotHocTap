@@ -60,7 +60,7 @@ def list_sessions(root: Path, limit: int = 40) -> list:
         h = _head(p)
         m = p.stat().st_mtime
         cwd = h["cwd"]
-        out.append({"id": p.stem, "cwd": cwd, "project": Path(cwd).name if cwd else p.parent.name, "title": h["title"] or "(chưa có câu hỏi)",
+        out.append({"id": p.stem, "path": str(p), "cwd": cwd, "project": Path(cwd).name if cwd else p.parent.name, "title": h["title"] or "(chưa có câu hỏi)",
                     "mtime": m, "ago": now - m, "live": now - m < LIVE_SECS, "ok": in_drive(cwd, root)})
     return out
 
@@ -81,3 +81,30 @@ def ago_text(secs: float) -> str:
     if secs < 129600:
         return f"{int(secs // 3600)} giờ trước"
     return f"{int(secs // 86400)} ngày trước"
+
+
+def find_path(sid: str) -> str:
+    """Đường dẫn file phiên theo ID (tìm trong mọi dự án)."""
+    for p in BASE.glob(f"*/{sid}.jsonl"):
+        return str(p)
+    return ""
+
+
+def context_tokens(path: str, tail_bytes: int = 600_000) -> int:
+    """Số token ngữ cảnh ở lượt trả lời gần nhất (input + cache), đọc từ cuối file; 0 nếu không đọc được. Đó là cỡ bị gửi lại mỗi tin nhắn."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            raw = f.read()
+        for line in reversed(raw.decode("utf-8", "ignore").splitlines()):
+            try:
+                u = (json.loads(line).get("message") or {}).get("usage")
+            except Exception:
+                continue
+            if isinstance(u, dict) and "input_tokens" in u:
+                return int(u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0))
+    except Exception:
+        pass
+    return 0
