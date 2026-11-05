@@ -6,7 +6,7 @@ Trợ lý Telegram cá nhân chạy **ngay trên PC của bạn**. Bot trả l�
 
 Ban đầu chỉ là bot ôn bài (RAG trên ghi chú bài giảng), sau lớn dần thành một trợ lý nhỏ. Bot thiết kế cho **một chủ**; người khác chỉ dùng được phần học tập.
 
-> Tình trạng: dự án cá nhân, tác giả dùng hằng ngày. Phần thêm ngày 05/11/2026 (chế độ Claude, chọn phiên, tìm file cả ổ, menu mới) đã thử bằng script nhưng **chưa thử trên Telegram thật**.
+> Tình trạng: dự án cá nhân, tác giả dùng hằng ngày. Phần làm ngày 05/11/2026 (chế độ Claude, chọn phiên, tìm file cả ổ, menu mới) tác giả đã thử trên Telegram thật; nút «Thêm file» của notebook mới hơn nên mới thử bằng script.
 
 ## Mục tiêu thiết kế
 
@@ -42,7 +42,7 @@ Telegram ──► bot (python-telegram-bot, polling, chạy ở khay hệ thố
 Lưu ý: gõ ở VS Code và Telegram trên *cùng một* phiên cùng lúc sẽ làm lịch sử lệch nhau; và mỗi tin nhắn gửi lại toàn bộ lịch sử phiên nên phiên dài tốn nhiều token (nên nén trước).
 
 ### NotebookLM
-`/notebook` chọn một notebook; sau đó mọi tin thường được gửi **nguyên văn** vào khung chat của notebook đó (qua công cụ `nlm`), nên bạn đối chiếu được với giao diện web. `/nbsrc` liệt kê nguồn.
+`/notebook` chọn một notebook; sau đó mọi tin thường được gửi **nguyên văn** vào khung chat của notebook đó (qua công cụ `nlm`), nên bạn đối chiếu được với giao diện web. Các nút dưới khung chat cho xem nguồn của notebook, thêm file (gõ tên hoặc gửi file từ điện thoại) hoặc thoát chế độ.
 
 ### Các phần khác
 | Phần | Làm gì |

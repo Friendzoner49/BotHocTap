@@ -6,7 +6,7 @@ A personal Telegram assistant that runs **on your own PC**. It answers questions
 
 It started as a "study bot" (RAG over lecture notes) and grew into a small assistant. Everything is single-user by design; other people can only use the study features.
 
-> Status: personal project, used daily by its author. Features added on 2026-11-05 (Claude mode, session picker, whole-drive file search, new menu) were tested with scripts but **not yet on a real Telegram chat**.
+> Status: personal project, used daily by its author. The 2026-11-05 features (Claude mode, session picker, whole-drive file search, new menu) were tested by the author on a real Telegram chat; the notebook "Add file" button is newer and only script-tested.
 
 ## Design goals
 
@@ -42,7 +42,7 @@ Telegram ──► bot (python-telegram-bot, long polling, runs in the tray on y
 Caveats: typing in VS Code and Telegram on the *same* session at the same moment makes the history diverge; and every message re-sends the whole session history, so long sessions cost more tokens (compact first).
 
 ### NotebookLM
-`/notebook` picks a notebook; then every normal message is sent **verbatim** to that notebook's own chat (through the `nlm` CLI), so you can compare with the web UI. `/nbsrc` lists its sources.
+`/notebook` picks a notebook; then every normal message is sent **verbatim** to that notebook's own chat (through the `nlm` CLI), so you can compare with the web UI. Buttons under the chat show the notebook's sources, add a file (type a name or send one from the phone) or leave the mode.
 
 ### Other parts
 | Part | What it does |

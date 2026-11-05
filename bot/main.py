@@ -488,6 +488,9 @@ async def cmd_conspect(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_logged_in(update.effective_user.id):
         return
+    if update.effective_user.id == OWNER_ID and nb_state.get("id") and time.time() - nb_add_wait.pop(OWNER_ID, 0) < 300:
+        await nb_add_document(update, ctx)  # vừa bấm ➕ Thêm file trong chế độ notebook
+        return
     d = update.message.document
     assign = (update.message.caption or "").strip()
     ext = Path(d.file_name or "").suffix.lower()
@@ -1083,7 +1086,8 @@ def nlm_notebooks() -> list:
 
 
 NB_KB = InlineKeyboardMarkup([[InlineKeyboardButton("📚 Xem nguồn", callback_data="nb:src"),
-                               InlineKeyboardButton("⏹ Thoát notebook", callback_data="nb:off")]])
+                               InlineKeyboardButton("➕ Thêm file", callback_data="nb:add")],
+                              [InlineKeyboardButton("⏹ Thoát notebook", callback_data="nb:off")]])
 
 
 def nlm_ask(question: str) -> str:
@@ -1131,9 +1135,20 @@ async def on_nb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(q.message.chat_id, "Đã thoát chế độ notebook. Bot trả lời từ chỉ mục trên máy như cũ.")
         return
     if arg == "src":
-        fake = SimpleNamespace(message=q.message, effective_user=q.from_user, effective_chat=q.message.chat,
-                               effective_message=q.message, callback_query=None)
-        await cmd_nbsrc(fake, ctx)
+        await nb_show_sources(q.message)
+        return
+    if arg == "add":
+        if not nb_state.get("id"):
+            await ctx.bot.send_message(q.message.chat_id, "Chưa chọn notebook. Gõ /notebook rồi bấm số.")
+            return
+        nb_add_wait[OWNER_ID] = time.time()
+        await ctx.bot.send_message(q.message.chat_id, f"➕ Thêm file vào «{nb_state['title']}»: gõ tên file (tìm cả ổ K:, không cần dấu) "
+                                   "hoặc gửi thẳng file từ điện thoại vào đây (dưới 20 MB). NotebookLM nhận PDF, DOCX, PPTX, TXT, MD, MP3, M4A; .doc cũ bot tự đổi sang PDF.",
+                                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖ Hủy", callback_data="nb:cancel")]]))
+        return
+    if arg == "cancel":
+        nb_add_wait.pop(OWNER_ID, None)
+        await ctx.bot.send_message(q.message.chat_id, "Đã hủy.", reply_markup=NB_KB)
         return
     try:
         n = nb_list[int(arg)]
@@ -1147,25 +1162,131 @@ async def on_nb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                                   "(không qua tìm file hay hỏi đáp tài liệu).", reply_markup=NB_KB)
 
 
-# ---------- /nbsrc: xem nguồn của notebook đang chọn (đã bỏ /nbadd, /nbnew theo yêu cầu 05/11) ----------
+# ---------- trong chế độ notebook: nút 📚 Xem nguồn và ➕ Thêm file (chỉ THÊM, không xóa; chỉ chủ). Không còn lệnh /nbsrc, /nbadd, /nbnew ----------
+NB_MAX_MB = 200  # ⚠ giới hạn mỗi file của NotebookLM (theo tài liệu công khai, chưa kiểm chứng)
+NB_WORD_OLD = (".doc", ".docm", ".rtf", ".odt", ".wps")
+NB_OK_EXTS = (".pdf", ".txt", ".md", ".docx", ".pptx", ".mp3", ".m4a")
+NB_ADD_EXTS = set(NB_OK_EXTS) | set(NB_WORD_OLD)
+WORD_EXE = Path(r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE")
+nb_add_wait: dict = {}  # uid -> thời điểm bấm ➕ Thêm file (chờ tên file hoặc file gửi từ điện thoại, 5 phút)
 
 
-async def cmd_nbsrc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
+async def nb_show_sources(message):
     if not nb_state.get("id"):
-        await update.message.reply_text("Chưa chọn notebook. Gõ /notebook rồi bấm số, sau đó /nbsrc để xem các nguồn.")
+        await message.reply_text("Chưa chọn notebook. Gõ /notebook rồi bấm số.")
         return
     try:
         out = await asyncio.to_thread(nlm_run, ["source", "list", nb_state["id"], "--json"], 90)
         data = json.loads(out[out.index("["):])
     except Exception:
         logging.exception("Liệt kê nguồn lỗi")
-        await update.message.reply_text("Không lấy được danh sách nguồn (mạng/VPN hoặc cần «nlm login»).")
+        await message.reply_text("Không lấy được danh sách nguồn (mạng/VPN hoặc cần «nlm login»).", reply_markup=NB_KB)
         return
     lines = [f"{i + 1}. {s.get('title') or s.get('name') or s.get('id')}" for i, s in enumerate(data)]
-    for chunk in split_text(f"Notebook «{nb_state['title']}» có {len(data)} nguồn:\n" + "\n".join(lines)):
-        await update.message.reply_text(chunk)
+    chunks = list(split_text(f"Notebook «{nb_state['title']}» có {len(data)} nguồn:\n" + "\n".join(lines)))
+    for i, chunk in enumerate(chunks):
+        await message.reply_text(chunk, reply_markup=NB_KB if i == len(chunks) - 1 else None)
+
+
+def convert_to_pdf_word(p: Path) -> Path:
+    """Chép bản PDF của file Word cũ sang nb_convert\\ bằng Word trên máy (file gốc giữ nguyên)."""
+    import subprocess
+    out_dir = ROOT / "nb_convert"
+    out_dir.mkdir(exist_ok=True)
+    out = out_dir / (p.stem + ".pdf")
+    ps = ("$w=New-Object -ComObject Word.Application;$w.Visible=$false;$w.DisplayAlerts=0;"
+          "try{$d=$w.Documents.Open($env:SRC_FILE,$false,$true);$d.SaveAs([ref]$env:DST_FILE,[ref]17);$d.Close($false)}"
+          "finally{$w.Quit()}")
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True, timeout=180, capture_output=True,
+                   env={**os.environ, "SRC_FILE": str(p), "DST_FILE": str(out)})
+    if not out.exists():
+        raise RuntimeError("Word không tạo được PDF")
+    return out
+
+
+async def upload_to_notebook(ctx, chat: int, n: dict, p: Path):
+    if p.suffix.lower() in NB_WORD_OLD and WORD_EXE.exists():  # NotebookLM không nhận .doc cũ → tự đổi sang PDF
+        await ctx.bot.send_message(chat, f"«{p.name}» là định dạng Word cũ, NotebookLM không nhận. Đang tự đổi sang PDF bằng Word trên máy (file gốc giữ nguyên)…")
+        try:
+            p = await asyncio.to_thread(convert_to_pdf_word, p)
+        except Exception:
+            logging.exception("Đổi .doc sang PDF lỗi")
+            await ctx.bot.send_message(chat, "Không đổi được sang PDF (file đang mở trong Word hoặc Word báo lỗi). "
+                                             "Hãy mở file trên máy, chọn Lưu thành → PDF rồi thêm lại.", reply_markup=NB_KB)
+            return
+    mb = p.stat().st_size / 1048576
+    if p.suffix.lower() not in NB_OK_EXTS:
+        await ctx.bot.send_message(chat, f"NotebookLM thường không nhận định dạng «{p.suffix}». Hãy chuyển sang PDF/DOCX rồi thử lại.", reply_markup=NB_KB)
+        return
+    if mb > NB_MAX_MB:
+        await ctx.bot.send_message(chat, f"«{p.name}» nặng {mb:.0f} MB, vượt khoảng {NB_MAX_MB} MB mỗi file của NotebookLM.", reply_markup=NB_KB)
+        return
+    await ctx.bot.send_message(chat, f"Đang đưa «{p.name}» ({mb:.1f} MB) lên notebook «{n['title']}», chờ NotebookLM xử lý…")
+    try:
+        await asyncio.to_thread(nlm_run, ["source", "add", n["id"], "--file", str(p), "--wait"], 900)
+    except Exception:
+        logging.exception("Thêm nguồn NotebookLM lỗi")
+        await ctx.bot.send_message(chat, "Không thêm được nguồn (định dạng chưa được NotebookLM hỗ trợ, mạng/VPN rớt, "
+                                         "hoặc phải đăng nhập lại: chạy «nlm login» trên máy).", reply_markup=NB_KB)
+        return
+    await ctx.bot.send_message(chat, f"Đã thêm «{p.name}» vào «{n['title']}». Cứ nhắn câu hỏi, hoặc bấm nút bên dưới.", reply_markup=NB_KB)
+
+
+async def nb_add_search(message, uid: int, q: str):
+    """Chủ gõ tên file sau khi bấm ➕ Thêm file: tìm cả ổ (không dấu), không khớp thì gợi ý tên gần đúng; mỗi file một nút 📤."""
+    files = await asyncio.to_thread(kfind.search, q, COURSE_DIR, OWNER_ROOT, True, NB_ADD_EXTS, 8)
+    head = ""
+    if not files:
+        files = await asyncio.to_thread(kfind.suggest, q, COURSE_DIR, OWNER_ROOT, True, NB_ADD_EXTS)
+        head = "Không có file khớp đúng tên. Gần giống nhất:\n"
+    if not files:
+        await message.reply_text("Không thấy file nào NotebookLM nhận được (PDF, DOCX, PPTX, TXT, MD, MP3, M4A, .doc cũ) khớp tên đó.", reply_markup=NB_KB)
+        return
+    found[uid] = files
+    lines = [f"{i + 1}. {p.name} ({p.stat().st_size / 1048576:.1f} MB)\n    📍 {where_of(p)}" for i, p in enumerate(files)]
+    btns = [InlineKeyboardButton(f"📤 {i + 1}", callback_data=f"nbu:{i}") for i in range(len(files))]
+    await reply_md(message, head + "\n".join(lines) + f"\nBấm số để thêm file đó vào «{nb_state['title']}».", InlineKeyboardMarkup(grid(btns)))
+
+
+async def nb_add_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Chủ gửi thẳng file từ điện thoại sau khi bấm ➕ Thêm file."""
+    import shutil
+    d = update.message.document
+    if d.file_size and d.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("File quá 20 MB (giới hạn tải về của bot Telegram). Hãy gõ tên file có sẵn trên máy tính.", reply_markup=NB_KB)
+        return
+    tmp = ROOT / "tmp_upload" / str(int(time.time()))
+    tmp.mkdir(parents=True, exist_ok=True)
+    path = tmp / (d.file_name or "file")
+    try:
+        await (await ctx.bot.get_file(d.file_id)).download_to_drive(path)
+        await upload_to_notebook(ctx, update.effective_chat.id, {"id": nb_state["id"], "title": nb_state["title"]}, path)
+    except Exception:
+        logging.exception("Thêm file gửi từ điện thoại lỗi")
+        await update.message.reply_text("Không thêm được file này. Thử lại hoặc gõ tên file có sẵn trên máy tính.", reply_markup=NB_KB)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+async def on_nbu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    uid = q.from_user.id
+    if uid != OWNER_ID:
+        return
+    await q.answer()
+    chat = q.message.chat_id
+    if not nb_state.get("id"):
+        await ctx.bot.send_message(chat, "Chưa chọn notebook. Gõ /notebook rồi bấm số.")
+        return
+    try:
+        p = found[uid][int(q.data.split(":")[1])]
+    except Exception:
+        await ctx.bot.send_message(chat, "Danh sách đã cũ, bấm ➕ Thêm file lại.", reply_markup=NB_KB)
+        return
+    if not can_access(uid, p):
+        await ctx.bot.send_message(chat, "File này không còn hoặc nằm ngoài phạm vi được phép.", reply_markup=NB_KB)
+        return
+    await upload_to_notebook(ctx, chat, {"id": nb_state["id"], "title": nb_state["title"]}, p)
 
 
 reindex_lock = asyncio.Lock()
@@ -1393,7 +1514,6 @@ MENU = {
         ("subject", "Xem/chọn môn đang hỏi", False, "", "all"),
         ("conspect", "Giải thích tiếng Việt + conspect tiếng Nga từ đề bài", True, "/conspect <đề bài> (hoặc gửi file kèm đề)", "all"),
         ("notebook", "Hỏi thẳng một notebook NotebookLM", False, "", "owner"),
-        ("nbsrc", "Xem nguồn của notebook đang chọn", False, "", "owner"),
     ]),
     "viec": ("✅ Việc cần làm & sổ nợ", [
         ("viec", "Xem việc hôm nay (tích ☑, ✏ sửa)", False, "", "owner"),
@@ -1464,7 +1584,6 @@ pending_input: dict = {}  # uid -> {"cmd", "ts"}: đã bấm ✍ trong menu, đa
 NEXT = {  # sau khi một lệnh «chạy ngay» xong: các nút gợi ý bước tiếp (bấm là chạy, hoặc chờ gõ nếu cần gõ thêm)
     "subject": [("find", "✍ Tìm file"), ("reset", "🧹 Hỏi lại từ đầu")],
     "reset": [("subject", "📚 Chọn môn"), ("find", "✍ Tìm file")],
-    "nbsrc": [("notebook", "📓 Đổi notebook")],
     "viec": [("xong", "✍ Tích xong một việc"), ("no", "📒 Sổ nợ")],
     "no": [("viec", "✅ Việc hôm nay")],
     "screen": [("screen", "🔄 Chụp lại"), ("status", "📊 Tình trạng máy"), ("open", "✍ Mở file")],
@@ -1688,6 +1807,9 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await cm_text(update.message, ctx, uid, update.effective_chat.id, update.message.text)
         return
     if uid == OWNER_ID and update.message.text and nb_state.get("id"):  # đang ở chế độ /notebook: mọi tin thường gửi thẳng cho notebook
+        if time.time() - nb_add_wait.pop(uid, 0) < 300:  # vừa bấm ➕ Thêm file: tin này là tên file
+            await nb_add_search(update.message, uid, update.message.text.strip())
+            return
         await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
         try:
             ans = await asyncio.to_thread(nlm_ask, update.message.text)
@@ -2497,7 +2619,7 @@ def main():
     app.add_handler(CommandHandler("conspect", cmd_conspect))
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(CommandHandler("notebook", cmd_notebook))
-    app.add_handler(CommandHandler("nbsrc", cmd_nbsrc))
+    app.add_handler(CallbackQueryHandler(on_nbu, pattern="^nbu:"))
     app.add_handler(CallbackQueryHandler(on_nb, pattern="^nb:"))
     app.add_handler(CallbackQueryHandler(on_get, pattern="^get:"))
     app.add_handler(CallbackQueryHandler(on_drive, pattern="^drv:"))
