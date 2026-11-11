@@ -11,6 +11,7 @@ pypdfium2
 python-docx
 python-pptx
 pystray
+psutil
 requests
 sentence-transformers
 torch   # install the CUDA build from pytorch.org for GPU embeddings
