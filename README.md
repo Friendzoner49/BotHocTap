@@ -22,7 +22,7 @@ Telegram ──► bot (python-telegram-bot, long polling, runs in the tray on y
               │
               ├─ login / owner check ───── strangers get silence
               ├─ active mode? (checked FIRST, before any guessing)
-              │     password prompt → /capnhat session → Claude mode → /notebook mode → "✍" pending argument
+              │     password prompt → web-AI import (/nhapai) → /capnhat session → Claude mode → /notebook mode → "✍" pending argument
               ├─ natural-language rules: debts ("Giang nợ 13k"), to-dos, "find me file …"
               └─ otherwise: question answering (RAG)
                     question ─► local index (bge-m3 embeddings, GPU) ─► top chunks
@@ -50,11 +50,12 @@ Caveats: typing in VS Code and Telegram on the *same* session at the same moment
 | `/viec` (`viec.py`) | To-do list kept as a Markdown file in the wiki; urgency labels from deadlines, 9:00 reminder, weekly report, paste an assignment (text, photo, file) and Gemini extracts tasks. |
 | debts (`congno.py`) | Natural-language debt book ("Giang nợ 13k", "Giang trả 5k"), local JSON, deliberately never written to the wiki or Git. |
 | `/conspect` (`conspect.py`) | Explanation + Russian-language study notes from an assignment and the indexed books. |
-| `/capnhat` | A session: Claude ingests articles dropped in the wiki inbox, lints the wiki every 10 sources, **asks you questions in the chat and remembers the answers**, then you press "Done" to commit and re-index. |
+| `/capnhat` | A session: Claude ingests articles dropped in the wiki inbox, lints the wiki every 10 sources, **asks you questions in the chat and remembers the answers**, then you press "Done" to commit and re-index. It also ingests answers from web AIs saved in `raw/ai-web/`, tagged "AI, unverified". |
+| `/nhapai` (`aiweb.py`) | Import a web-AI chat (ChatGPT, Qwen, Claude Web, Gemini app): a share link, pasted text (several messages are merged) or a .txt/.md file is saved to `raw/ai-web/` only; `/capnhat` or the weekly job ingests it. Also logs study time: first/last question time if the share page has them, otherwise 15/30/60/90-minute buttons. |
 | `weekly.py` | Monday 15:00 Task Scheduler job: ingests new course files into the wiki, summarises unanswered questions. |
 | `memory.py` | Long-term memory of the owner's Q&A, auto-summarised at 10 MB. |
 | Drive | Upload a found file to Google Drive (`drive.py`). |
-| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Research other AI agent systems: paste a GitHub link, get a draft evaluation card (metadata + README summary, no code run), later scored on 12 evidence-backed dimensions and merged into a comparison matrix. |
+| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Research other AI agent systems: paste a GitHub link, get a draft evaluation card (metadata + README summary, no code run), later scored on 12 evidence-backed dimensions and merged into a comparison matrix. YouTube links, web articles and files get a summary with a "💎 unusual / surprising" section and the wiki diff; a "🛠 Applied yet?" button checks each method against your own project pages (applied or not, what the wiki says it achieved, how to adopt it). |
 | Quality of life | A persistent bottom keyboard (Menu + groups), "Recent" buttons for `/find` and `/open`, session size shown before joining Claude mode and a 🗜 button that summarises the session into a fresh one. |
 
 ## Security model

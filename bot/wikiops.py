@@ -35,6 +35,64 @@ LINT_PROMPT = (
 )
 
 
+# ---------- Câu trả lời từ AI web (ChatGPT, Qwen, Claude Web, app Gemini…): chủ thả file vào raw/ai-web/ (hoặc nhập qua /nhapai) ----------
+AIWEB_NAMES = {"chatgpt": "ChatGPT", "gpt": "ChatGPT", "openai": "ChatGPT", "qwen": "Qwen", "gemini": "Gemini (app web)",
+               "claude": "Claude Web", "notebooklm": "NotebookLM", "notebook": "NotebookLM", "deepseek": "DeepSeek",
+               "grok": "Grok", "perplexity": "Perplexity", "copilot": "Copilot"}
+AIWEB_RULE = (
+    "File tên `aiweb-*` là câu trả lời chủ chép từ một AI web (ChatGPT, Qwen, Claude Web, app Gemini…), KHÔNG phải tài liệu đã kiểm chứng: "
+    "trang nguồn ghi rõ «Nguồn: AI web — <tên AI>, chưa kiểm chứng», chỉ giữ kiến thức/phương pháp dùng được, bỏ lời chào và câu hỏi lặp; "
+    "khẳng định quan trọng (số liệu, giá, tính năng, ngày) đánh dấu ⚠ chưa kiểm chứng; trái với nguồn đã có trong wiki thì xử lý như MÂU THUẪN. "
+)
+
+
+def aiweb_name(p: Path, base: Path) -> str:
+    """Đoán tên AI từ thư mục con (raw/ai-web/chatgpt/…) hoặc tên file (qwen-….md); không đoán được → «AI web»."""
+    for part in [*p.relative_to(base).parts[:-1], p.stem]:
+        low = part.lower()
+        for k, v in AIWEB_NAMES.items():
+            if low == k or low.startswith(k + "-") or low.startswith(k + "_") or low.startswith(k + " "):
+                return v
+    return "AI web"
+
+
+def collect_ai_web(wiki_dir: Path) -> list:
+    """Chuyển mọi .md/.txt trong raw/ai-web/ (kể cả thư mục con, trừ done/) thành raw/inbox/aiweb-*.md có dòng nguồn,
+    rồi dời file gốc sang raw/ai-web/done/ (không xóa). Trả danh sách tên file inbox mới. Gọi khi đang giữ khóa «wiki»."""
+    base = wiki_dir / "raw" / "ai-web"
+    inbox, done = wiki_dir / "raw" / "inbox", base / "done"
+    if not base.exists():
+        return []
+    made = []
+    for f in sorted([*base.rglob("*.md"), *base.rglob("*.txt")]):
+        if done in f.parents or f.name.lower().startswith("readme"):
+            continue
+        try:
+            body = f.read_text(encoding="utf-8-sig", errors="replace").strip()
+        except OSError:
+            continue  # file đang mở/khóa: để lần sau
+        if not body:
+            continue
+        name = aiweb_name(f, base)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in f.stem)[:50]
+        rel = f.relative_to(base).as_posix()
+        done.mkdir(parents=True, exist_ok=True)
+        tgt = done / f.name
+        if tgt.exists():
+            tgt = done / f"{f.stem}-{stamp}{f.suffix}"
+        try:  # dời file gốc TRƯỚC: file đang mở/khóa thì bỏ qua, lần sau lấy (không tạo bản trùng trong inbox)
+            f.replace(tgt)
+        except OSError:
+            continue
+        inbox.mkdir(parents=True, exist_ok=True)
+        dst = inbox / f"aiweb-{slug}-{stamp}.md"
+        dst.write_text(f"# Câu trả lời từ AI web: {name} (chưa kiểm chứng)\n\nNguồn: AI web — {name}, chủ chép lại "
+                       f"(file gốc raw/ai-web/{rel}, {time.strftime('%Y-%m-%d')}).\n\n{body}\n", encoding="utf-8")
+        made.append(dst.name)
+    return made
+
+
 def load() -> dict:
     try:
         return json.loads(LINT_STATE.read_text(encoding="utf-8"))

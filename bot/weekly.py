@@ -130,6 +130,11 @@ def main():
         notify("⚠ Lần cập nhật tuần trước bị ngắt giữa lúc nạp wiki. Các bài sau có thể đã được nạp một phần, lần này sẽ nạp lại "
                "(Claude cập nhật trang có sẵn, ít khi tạo trùng). Nếu thấy trang trùng thì gõ /capnhat để bước dọn gộp lại:\n"
                + INGEST_MARK.read_text(encoding="utf-8")[:1500])
+    try:  # câu trả lời AI web chủ thả vào raw/ai-web/ (hoặc nhập qua /nhapai) → inbox, gắn nhãn chưa kiểm chứng
+        import wikiops
+        wikiops.collect_ai_web(WIKI_DIR)
+    except Exception as e:
+        print("Gom file AI web lỗi:", e)
     inbox = sorted((WIKI_DIR / "raw" / "inbox").glob("*.md"))  # mọi bài/ghi chú trong inbox (Web Clipper, Obsidian, /capnhat <nội dung>)
     if listing or miss or inbox:
         INGEST_MARK.write_text(f"{today}: " + (", ".join(nf.name for nf in inbox) or "chỉ tài liệu môn"), encoding="utf-8")

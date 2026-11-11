@@ -22,7 +22,7 @@ Telegram ──► bot (python-telegram-bot, polling, chạy ở khay hệ thố
               │
               ├─ đăng nhập / kiểm tra chủ ───── người lạ: im lặng
               ├─ đang ở chế độ nào? (xét TRƯỚC mọi luật đoán ý)
-              │     chờ mật khẩu → phiên /capnhat → chế độ Claude → chế độ /notebook → tham số của nút «✍»
+              │     chờ mật khẩu → nhập AI web (/nhapai) → phiên /capnhat → chế độ Claude → chế độ /notebook → tham số của nút «✍»
               ├─ luật câu tự nhiên: nợ («Giang nợ 13k»), việc, «tìm cho tôi file …»
               └─ còn lại: hỏi đáp (RAG)
                     câu hỏi ─► chỉ mục cục bộ (bge-m3, GPU) ─► các đoạn gần nhất
@@ -50,11 +50,12 @@ Lưu ý: gõ ở VS Code và Telegram trên *cùng một* phiên cùng lúc sẽ
 | `/viec` (`viec.py`) | Việc cần làm lưu thành file Markdown trong wiki; nhãn gấp/quan trọng theo hạn, nhắc 9:00, báo cáo tuần; dán đề (chữ, ảnh, file) thì Gemini rút việc. |
 | sổ nợ (`congno.py`) | Sổ nợ nói tự nhiên («Giang nợ 13k», «Giang trả 5k»), JSON cục bộ, cố ý không ghi vào wiki hay Git. |
 | `/conspect` (`conspect.py`) | Giải thích + conspect tiếng Nga từ đề bài và sách đã lập chỉ mục. |
-| `/capnhat` | Một phiên: Claude nạp bài trong inbox wiki, kiểm tra wiki mỗi 10 nguồn, **hỏi bạn ngay trong chat và nhớ câu trả lời**, bạn bấm «Xong» để lưu và lập lại chỉ mục. |
+| `/capnhat` | Một phiên: Claude nạp bài trong inbox wiki, kiểm tra wiki mỗi 10 nguồn, **hỏi bạn ngay trong chat và nhớ câu trả lời**, bạn bấm «Xong» để lưu và lập lại chỉ mục. Lệnh này cũng nạp câu trả lời AI web nằm trong `raw/ai-web/`, kèm nhãn «AI, chưa kiểm chứng». |
+| `/nhapai` (`aiweb.py`) | Nhập cuộc chat với AI web (ChatGPT, Qwen, Claude Web, app Gemini): link chia sẻ, chữ dán (nhiều tin được gom lại) hoặc file .txt/.md, chỉ lưu vào `raw/ai-web/`; `/capnhat` hoặc lần chạy hằng tuần sẽ nạp. Kèm ghi giờ học: giờ câu đầu/câu cuối nếu trang chia sẻ có, không thì nút 15/30/60/90 phút. |
 | `weekly.py` | Việc thứ Hai 15:00 (Task Scheduler): nạp file môn mới vào wiki, tổng hợp câu hỏi chưa trả lời được. |
 | `memory.py` | Bộ nhớ dài hạn các câu hỏi-đáp của chủ, tự tóm tắt khi đạt 10 MB. |
 | Drive | Đưa file tìm được lên Google Drive (`drive.py`). |
-| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Nghiên cứu các hệ thống AI Agent khác: dán link GitHub, bot tạo thẻ đánh giá nháp (thông tin repo + tóm tắt README, không chạy mã), sau đó chấm 12 chiều có bằng chứng và gộp vào bảng so sánh. |
+| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Nghiên cứu các hệ thống AI Agent khác: dán link GitHub, bot tạo thẻ đánh giá nháp (thông tin repo + tóm tắt README, không chạy mã), sau đó chấm 12 chiều có bằng chứng và gộp vào bảng so sánh. Link YouTube, bài viết, file: bản tóm tắt có mục «💎 điểm độc, lạ» và điểm mới so với wiki; nút «🛠 Đã áp dụng chưa?» đối chiếu từng phương pháp với trang dự án của bạn (đã áp dụng chưa, wiki ghi hiệu quả ra sao, cách tích hợp). |
 | Tiện dùng | Thanh nút cố định ở đáy (Menu + các nhóm), nút «Gần đây» cho `/find` và `/open`, hiện cỡ phiên trước khi nối chế độ Claude và nút 🗜 tóm tắt phiên sang phiên mới. |
 
 ## Mô hình an toàn
