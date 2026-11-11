@@ -52,6 +52,37 @@ def watchdog():
         time.sleep(2)
 
 
+TITLE = "BotHocTap (bấm để xem log)"
+
+
+def net_watch():
+    """Đọc net_state.json do bot ghi: đang mất kết nối Telegram > 90 giây thì đổi chữ biểu tượng và hiện thông báo Windows (1 lần mỗi đợt)."""
+    import json
+    told = None
+    while not state["stop"]:
+        time.sleep(30)
+        icon = state.get("icon")
+        if icon is None:
+            continue
+        try:
+            d = json.loads((ROOT / "net_state.json").read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        down, now = d.get("down_since"), time.time()
+        if down and now - down > 90 and now - d.get("last_fail", 0) < 300:
+            since = time.strftime("%H:%M", time.localtime(down))
+            icon.title = f"BotHocTap ⚠ mất kết nối Telegram từ {since}"[:120]
+            if told != down:
+                told = down
+                try:
+                    icon.notify(f"Từ {since}: {d.get('err', '')}. Bot sẽ tự nối lại và báo trên Telegram khi có mạng.",
+                                "BotHocTap mất kết nối Telegram")
+                except Exception:
+                    pass
+        elif icon.title != TITLE:
+            icon.title = TITLE
+
+
 def toggle_viewer(icon=None, item=None):
     v = state["viewer"]
     if v and v.poll() is None:
@@ -83,8 +114,10 @@ def main():
         pystray.MenuItem("Xem/ẩn log", toggle_viewer, default=True),
         pystray.MenuItem("Chạy lại bot", restart),
         pystray.MenuItem("Thoát", quit_app))
-    pystray.Icon("BotHocTap", Image.open(ROOT / "Logo_tron.png").convert("RGBA").resize((64, 64)),
-                 "BotHocTap (bấm để xem log)", menu).run()
+    icon = pystray.Icon("BotHocTap", Image.open(ROOT / "Logo_tron.png").convert("RGBA").resize((64, 64)), TITLE, menu)
+    state["icon"] = icon
+    threading.Thread(target=net_watch, daemon=True).start()
+    icon.run()
 
 
 if __name__ == "__main__":

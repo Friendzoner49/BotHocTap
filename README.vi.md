@@ -31,7 +31,7 @@ Telegram ──► bot (python-telegram-bot, polling, chạy ở khay hệ thố
 ```
 
 ### Hỏi đáp (RAG)
-`index_course.bat` cắt file môn học (PDF, DOCX, PPTX, văn bản, mã; PDF scan qua OCR) thành các đoạn và nhúng cục bộ bằng BAAI/bge-m3 vào `index_local/`. Wiki Obsidian cũng được lập chỉ mục. Câu hỏi được nhúng, lấy các đoạn gần nhất, Gemini chỉ dựa vào các đoạn đó để trả lời và nêu file, trang. Mỗi câu trả lời có một dòng giải thích để bạn tự đánh giá việc tìm có tốt không.
+`index_course.bat` cắt file môn học (PDF, DOCX, PPTX, văn bản, mã; PDF scan qua OCR) thành các đoạn và nhúng cục bộ bằng BAAI/bge-m3 vào `index_local/`. Wiki Obsidian cũng được lập chỉ mục. Câu hỏi được tìm đồng thời theo nghĩa (nhúng chữ) và theo từ khóa (BM25, không phân biệt dấu nên mã như «stk 03» vẫn khớp), hai bảng xếp hạng được trộn lại, trang wiki được cắt theo đề mục, có thể thêm một trang liên kết, 10 đoạn tốt nhất gửi cho Gemini (câu hỏi lặp lại được trả lời tức thì từ bộ nhớ đệm cục bộ, có nút «Hỏi lại cho mới»), Gemini chỉ dựa vào các đoạn đó để trả lời và nêu file, trang. Mỗi câu trả lời có một dòng giải thích để bạn tự đánh giá việc tìm có tốt không.
 
 ### Tìm và mở file
 `kfind.py` giữ **chỉ mục tên file** trong bộ nhớ (dựng ở luồng nền) cho thư mục môn học và, với chủ, cả ổ đĩa. Tìm không phân biệt hoa thường và dấu («tu duy he thong» ra «tư duy hệ thống»). Không khớp đúng thì gợi ý tên gần giống. File bí mật (`.env`, `password.json`, token, khóa) không bao giờ hiện; người đăng nhập thường chỉ thấy thư mục môn học. `/open` từ chối các loại file chạy được.
@@ -54,6 +54,7 @@ Lưu ý: gõ ở VS Code và Telegram trên *cùng một* phiên cùng lúc sẽ
 | `weekly.py` | Việc thứ Hai 15:00 (Task Scheduler): nạp file môn mới vào wiki, tổng hợp câu hỏi chưa trả lời được. |
 | `memory.py` | Bộ nhớ dài hạn các câu hỏi-đáp của chủ, tự tóm tắt khi đạt 10 MB. |
 | Drive | Đưa file tìm được lên Google Drive (`drive.py`). |
+| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Nghiên cứu các hệ thống AI Agent khác: dán link GitHub, bot tạo thẻ đánh giá nháp (thông tin repo + tóm tắt README, không chạy mã), sau đó chấm 12 chiều có bằng chứng và gộp vào bảng so sánh. |
 | Tiện dùng | Thanh nút cố định ở đáy (Menu + các nhóm), nút «Gần đây» cho `/find` và `/open`, hiện cỡ phiên trước khi nối chế độ Claude và nút 🗜 tóm tắt phiên sang phiên mới. |
 
 ## Mô hình an toàn

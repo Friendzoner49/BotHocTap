@@ -31,7 +31,7 @@ Telegram ──► bot (python-telegram-bot, long polling, runs in the tray on y
 ```
 
 ### Question answering (RAG)
-`index_course.bat` splits your course files (PDF, DOCX, PPTX, text, code; scanned PDFs through OCR) into chunks and embeds them locally with BAAI/bge-m3 into `index_local/`. The Obsidian wiki is indexed too. A question is embedded, the nearest chunks are retrieved, and Gemini answers using only those chunks and cites file and page. Each answer ends with a short explanation line so you can judge whether the retrieval was any good.
+`index_course.bat` splits your course files (PDF, DOCX, PPTX, text, code; scanned PDFs through OCR) into chunks and embeds them locally with BAAI/bge-m3 into `index_local/`. The Obsidian wiki is indexed too. A question is searched two ways at once, by meaning (embeddings) and by keywords (BM25, accent-insensitive, so lecture codes like "stk 03" match), and the two rankings are merged; wiki pages are split by heading, one linked neighbour page can be added, the 10 best chunks go to Gemini (a repeated question is answered instantly from a local cache with a "ask again" button), which answers using only those chunks and cites file and page. Each answer ends with a short explanation line so you can judge whether the retrieval was any good.
 
 ### Finding and opening files
 `kfind.py` keeps an in-memory **name index** (built in a background thread) of the course folder and, for the owner, the whole drive. Search ignores case and diacritics ("tu duy he thong" finds "tư duy hệ thống"). No exact hit → closest names are suggested. Secrets (`.env`, `password.json`, tokens, keys) never appear; other logged-in users only see the course folder. `/open` refuses runnable file types.
@@ -54,6 +54,7 @@ Caveats: typing in VS Code and Telegram on the *same* session at the same moment
 | `weekly.py` | Monday 15:00 Task Scheduler job: ingests new course files into the wiki, summarises unanswered questions. |
 | `memory.py` | Long-term memory of the owner's Q&A, auto-summarised at 10 MB. |
 | Drive | Upload a found file to Google Drive (`drive.py`). |
+| `/nghiencuu` (`agentscan.py`, `agentmatrix.py`) | Research other AI agent systems: paste a GitHub link, get a draft evaluation card (metadata + README summary, no code run), later scored on 12 evidence-backed dimensions and merged into a comparison matrix. |
 | Quality of life | A persistent bottom keyboard (Menu + groups), "Recent" buttons for `/find` and `/open`, session size shown before joining Claude mode and a 🗜 button that summarises the session into a fresh one. |
 
 ## Security model

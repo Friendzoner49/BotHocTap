@@ -318,3 +318,35 @@ def week_report() -> str:
 def left(it: dict) -> str:
     n = (it["due"] - date.today()).days
     return "quá hạn %d ngày" % -n if n < 0 else ("hôm nay" if n == 0 else "còn %d ngày" % n)
+
+
+def plan_week() -> str:
+    """Kế hoạch tuần tới (gửi sáng thứ Hai): quá hạn, việc theo từng ngày T2→CN, việc không hạn đáng chú ý. Không dùng AI."""
+    today = date.today()
+    mon = today - timedelta(days=today.weekday())
+    openi = [i for i in load() if not i.get("done")]
+    out = [f"🗓 Kế hoạch tuần {mon.strftime('%d/%m')} – {(mon + timedelta(days=6)).strftime('%d/%m')}", ""]
+    late = [i for i in openi if i["label"] != "desau" and i["due"] < mon]
+    if late:
+        out.append("⚠ Quá hạn từ tuần trước:")
+        out += [f"  • #{i['id']} {i['text']} ({-(i['due'] - today).days} ngày)" for i in sorted(late, key=lambda i: i["due"])]
+        out.append("")
+    any_day = False
+    for k in range(7):
+        d = mon + timedelta(days=k)
+        part = [i for i in openi if i["label"] != "desau" and i["due"] == d]
+        if part:
+            any_day = True
+            out.append(day_name(d) + (" (hôm nay)" if d == today else ""))
+            out += [f"  • #{i['id']} {i['text']}" for i in part]
+    if not any_day:
+        out.append("Tuần này chưa có việc nào có hạn.")
+    later = [i for i in openi if i["label"] != "desau" and i["due"] > mon + timedelta(days=6)]
+    if later:
+        nxt = sorted(later, key=lambda i: i["due"])[:3]
+        out += ["", "👀 Sau tuần này: " + "; ".join(f"{i['text']} ({i['due'].strftime('%d/%m')})" for i in nxt)]
+    desau = [i for i in openi if i["label"] == "desau"]
+    if desau:
+        out += ["", f"🟢 Để sau: {len(desau)} việc, tuần này có muốn làm việc nào không? Gõ /viec để xem."]
+    out += ["", "Thêm việc cho tuần: nhắn «nộp lab 5 thứ sáu», hoặc dán đề vào /viec."]
+    return "\n".join(out)
