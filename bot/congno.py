@@ -1,5 +1,5 @@
 """Sổ nợ nhỏ của chủ bot (tạm thời, KHÔNG ghi vào wiki): file cong_no.json cạnh bot, nằm ngoài Git.
-Một dòng nhập: «Giang nợ 13k» (Giang nợ tôi 13.000) hoặc «nợ Giang 13k» / «tôi nợ Giang 13k» (tôi nợ Giang).
+Một dòng nhập: «Bình nợ 13k» (Bình nợ tôi 13.000) hoặc «nợ Bình 13k» / «tôi nợ Bình 13k» (tôi nợ Bình).
 Tiền tệ mặc định VND, đổi trong phần sửa: USD / RUB / VND."""
 import json
 import re
@@ -21,7 +21,7 @@ ASP = r"(?:\s+(?:đã|vừa|mới|đang|sẽ))*"
 I_OWE = re.compile(rf"^(?:(?:{ME}){ASP}\s+)?{VERB}\s+(?P<name>.+?)\s+(?P<amt>\d.*)$", re.I)        # tao nợ Minh 80k / nợ Minh 80k / vay Minh 80k
 
 
-ASPECT = re.compile(r"\s+(?:đã|vừa|mới|có|đang|sẽ|vừa mới|mới vừa)$", re.I)   # «Vi đã trả…» → tên là «Vi»
+ASPECT = re.compile(r"\s+(?:đã|vừa|mới|có|đang|sẽ|vừa mới|mới vừa)$", re.I)   # «Mai đã trả…» → tên là «Mai»
 SUSPECT = re.compile(r"\b(?:đã|vừa|mới|đang|sẽ|chưa|rồi|xong|trả|hôm|qua|nay|nợ|vay|mượn|thiếu)\b", re.I)  # tên chứa từ này = hiểu nhầm câu → để Gemini xử lý
 
 
@@ -29,7 +29,7 @@ HONOR = re.compile(r"^(?:anh|chị|em|bạn|cô|chú|bác|ông|bà|cậu|dì|th�
 
 
 def key(name: str) -> str:
-    """Tên để so khớp: bỏ xưng hô đầu («anh Tân» = «Tân»), không phân biệt hoa thường."""
+    """Tên để so khớp: bỏ xưng hô đầu («anh Hùng» = «Hùng»), không phân biệt hoa thường."""
     return HONOR.sub("", name.strip()).casefold()
 
 
@@ -53,7 +53,7 @@ NOTE_SPLIT = re.compile(r"\.(?!\d)|\n")  # dấu chấm (không phải dấu ch�
 
 
 def split_note(text: str):
-    """«Giang nợ 13k. tiền cơm» → ('Giang nợ 13k', 'tiền cơm'). Không có dấu chấm/xuống dòng → không có ghi chú."""
+    """«Bình nợ 13k. tiền cơm» → ('Bình nợ 13k', 'tiền cơm'). Không có dấu chấm/xuống dòng → không có ghi chú."""
     m = NOTE_SPLIT.search(text)
     if not m:
         return text.strip(), ""
@@ -61,7 +61,7 @@ def split_note(text: str):
 
 
 def parse(text: str):
-    """«Giang nợ 13k» → {'name','dir','amount','cur'}; dir = 'owe_me' (người đó nợ tôi) hoặc 'i_owe' (tôi nợ). Không khớp → None."""
+    """«Bình nợ 13k» → {'name','dir','amount','cur'}; dir = 'owe_me' (người đó nợ tôi) hoặc 'i_owe' (tôi nợ). Không khớp → None."""
     t, note = split_note(text.strip())
     if len(t) > 80:
         return None
@@ -138,12 +138,12 @@ def task_text(r: dict, day: str) -> str:
 
 
 ALL = r"(?:hết|xong|đủ|sạch)"
-I_PAY = re.compile(rf"^(?:(?:{ME}){ASP}\s+)?trả\s+(?:nợ\s+)?(?P<name>.+?)\s+(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)       # tao trả Giang 5k / trả Giang hết
-PAY_ME = re.compile(rf"^(?P<name>.+?)\s+trả\s+(?:nợ\s+)?(?:{ME}\s+)?(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)           # Giang trả tao 5k / Giang trả hết
+I_PAY = re.compile(rf"^(?:(?:{ME}){ASP}\s+)?trả\s+(?:nợ\s+)?(?P<name>.+?)\s+(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)       # tao trả Bình 5k / trả Bình hết
+PAY_ME = re.compile(rf"^(?P<name>.+?)\s+trả\s+(?:nợ\s+)?(?:{ME}\s+)?(?P<amt>\d.*|{ALL}(?:\s.*)?)$", re.I)           # Bình trả tao 5k / Bình trả hết
 
 
 def parse_pay(text: str):
-    """«Giang trả 5k» → {'name','dir':'owe_me','amount':5000,'cur':None}; «tao trả Giang hết» → dir 'i_owe', amount None (= trả hết).
+    """«Bình trả 5k» → {'name','dir':'owe_me','amount':5000,'cur':None}; «tao trả Bình hết» → dir 'i_owe', amount None (= trả hết).
     Chỉ nhận dạng cú pháp; việc khớp với khoản nợ có thật do pay() kiểm tra."""
     t, _ = split_note(text.strip())
     if len(t) > 80:

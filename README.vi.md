@@ -23,7 +23,7 @@ Telegram ──► bot (python-telegram-bot, polling, chạy ở khay hệ thố
               ├─ đăng nhập / kiểm tra chủ ───── người lạ: im lặng
               ├─ đang ở chế độ nào? (xét TRƯỚC mọi luật đoán ý)
               │     chờ mật khẩu → nhập AI web (/nhapai) → phiên /capnhat → chế độ Claude → chế độ /notebook → tham số của nút «✍»
-              ├─ luật câu tự nhiên: nợ («Giang nợ 13k»), việc, «tìm cho tôi file …»
+              ├─ luật câu tự nhiên: nợ («Bình nợ 13k»), việc, «tìm cho tôi file …»
               └─ còn lại: hỏi đáp (RAG)
                     câu hỏi ─► chỉ mục cục bộ (bge-m3, GPU) ─► các đoạn gần nhất
                             ─► Gemini viết câu trả lời chỉ từ các đoạn đó
@@ -48,7 +48,7 @@ Lưu ý: gõ ở VS Code và Telegram trên *cùng một* phiên cùng lúc sẽ
 | Phần | Làm gì |
 |---|---|
 | `/viec` (`viec.py`) | Việc cần làm lưu thành file Markdown trong wiki; nhãn gấp/quan trọng theo hạn, nhắc 9:00, báo cáo tuần; dán đề (chữ, ảnh, file) thì Gemini rút việc. |
-| sổ nợ (`congno.py`) | Sổ nợ nói tự nhiên («Giang nợ 13k», «Giang trả 5k»), JSON cục bộ, cố ý không ghi vào wiki hay Git. |
+| sổ nợ (`congno.py`) | Sổ nợ nói tự nhiên («Bình nợ 13k», «Bình trả 5k»), JSON cục bộ, cố ý không ghi vào wiki hay Git. |
 | `/conspect` (`conspect.py`) | Giải thích + conspect tiếng Nga từ đề bài và sách đã lập chỉ mục. |
 | `/capnhat` | Một phiên: Claude nạp bài trong inbox wiki, kiểm tra wiki mỗi 10 nguồn, **hỏi bạn ngay trong chat và nhớ câu trả lời**, bạn bấm «Xong» để lưu và lập lại chỉ mục. Lệnh này cũng nạp câu trả lời AI web nằm trong `raw/ai-web/`, kèm nhãn «AI, chưa kiểm chứng». |
 | `/nhapai` (`aiweb.py`) | Nhập cuộc chat với AI web (ChatGPT, Qwen, Claude Web, app Gemini): link chia sẻ, chữ dán (nhiều tin được gom lại) hoặc file .txt/.md, chỉ lưu vào `raw/ai-web/`; `/capnhat` hoặc lần chạy hằng tuần sẽ nạp. Kèm ghi giờ học: giờ câu đầu/câu cuối nếu trang chia sẻ có, không thì nút 15/30/60/90 phút. |

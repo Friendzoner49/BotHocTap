@@ -268,7 +268,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if uid == OWNER_ID:
         lines += ["**Gõ tự nhiên (chủ)**",
                   "• Việc: «nộp lab 5 thứ sáu tuần sau» hoặc /viec <việc> | <hạn>; dán đề dài hoặc gửi ảnh/file kèm /viec để bot tự rút việc.",
-                  "• Nợ: «Giang nợ 13k» (Giang nợ tôi), «nợ Giang 13k» (tôi nợ), «Giang trả 5k» (trừ nợ).",
+                  "• Nợ: «Bình nợ 13k» (Bình nợ tôi), «nợ Bình 13k» (tôi nợ), «Bình trả 5k» (trừ nợ).",
                   "• Đang ở chế độ notebook, Claude, cùng đọc (/nghiencuu) hay nhập AI web (/nhapai) thì mọi tin thường gửi thẳng vào đó; bấm ⏹ để thoát."]
     await reply_md(update.message, "\n".join(lines).strip())
 
@@ -3413,7 +3413,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await hd_start(update.message, update.message.text)  # «gửi hóa đơn cho Lan» → chọn + nút ✅ (không gửi ngay)
         return
     if uid == OWNER_ID and await no_smart(update.message, update.message.text, quiet=True):
-        return  # «Giang nợ 13k», «Vi đã trả nợ tôi 20k xong rồi»… (nợ/trả nợ bằng ngôn ngữ tự nhiên)
+        return  # «Bình nợ 13k», «Mai đã trả nợ tôi 20k xong rồi»… (nợ/trả nợ bằng ngôn ngữ tự nhiên)
     if uid == OWNER_ID and viec_edit.get("id") and time.time() - viec_edit.get("ts", 0) < 900 and len(update.message.text) <= 200:
         msg, f = update.message.text.strip(), viec_edit["field"]  # đang chờ tên/hạn mới cho việc bấm ✏
         if f == "rn":
@@ -4172,11 +4172,11 @@ async def viec_loop(app: Application):
         await asyncio.sleep(30)
 
 
-# ---------- sổ nợ (chỉ chủ, tạm thời, KHÔNG ghi wiki): «Giang nợ 13k» / «nợ Giang 13k»; tạo việc trả nợ/nhắc nợ ----------
+# ---------- sổ nợ (chỉ chủ, tạm thời, KHÔNG ghi wiki): «Bình nợ 13k» / «nợ Bình 13k»; tạo việc trả nợ/nhắc nợ ----------
 no_wait: dict = {}  # {"id", "field": "amt"|"date", "ts"} khi chờ chủ gõ số tiền/ngày mới
 NO_DIR = {"owe_me": "🟢 Nợ tôi", "i_owe": "🔴 Tôi nợ"}
-NO_HELP = ("Sổ nợ: gõ «Giang nợ 13k» (Giang nợ tôi), «nợ Giang 13k» hoặc «tôi nợ Giang 13k» (tôi nợ Giang). "
-           "13k = 13.000, 1,5tr = 1.500.000, thêm usd/rub nếu cần. Ghi chú: thêm sau dấu chấm hoặc xuống dòng («Giang nợ 13k. tiền cơm»); không có dấu chấm thì không có ghi chú. /no xem danh sách; bấm tên để sửa, đổi tiền tệ, tạo việc.")
+NO_HELP = ("Sổ nợ: gõ «Bình nợ 13k» (Bình nợ tôi), «nợ Bình 13k» hoặc «tôi nợ Bình 13k» (tôi nợ Bình). "
+           "13k = 13.000, 1,5tr = 1.500.000, thêm usd/rub nếu cần. Ghi chú: thêm sau dấu chấm hoặc xuống dòng («Bình nợ 13k. tiền cơm»); không có dấu chấm thì không có ghi chú. /no xem danh sách; bấm tên để sửa, đổi tiền tệ, tạo việc.")
 
 
 
@@ -4190,7 +4190,7 @@ def gemini_debt(raw: str):
         "Người viết câu sau là CHỦ SỔ NỢ. Họ tự xưng bằng: tôi, tao, tớ, tui, mình, bố, bố mày, bố m, ông đây… (tất cả đều là CHỦ SỔ NỢ). "
         f"SỔ NỢ HIỆN TẠI: {ledger}.\n"
         "Phân loại câu: \"add\" = khoản nợ/vay/mượn MỚI; \"pay\" = có người TRẢ nợ (kể cả «đã trả nợ tôi 20k xong rồi», «trả hết»); "
-        "\"none\" = không phải chuyện nợ. Trả JSON thuần {\"action\": ..., \"name\": \"tên người kia, dùng đúng tên trong sổ nếu có (vd Vi chứ không phải Vi đã)\", "
+        "\"none\" = không phải chuyện nợ. Trả JSON thuần {\"action\": ..., \"name\": \"tên người kia, dùng đúng tên trong sổ nếu có (vd Mai chứ không phải Mai đã)\", "
         "\"dir\": \"owe_me\" nếu người kia nợ/trả chủ, \"i_owe\" nếu chủ nợ/trả người kia, \"amount\": số nguyên (13k = 13000, 2tr = 2000000; "
         "null nếu chỉ nói trả hết/xong mà không nêu số), \"cur\": \"VND\"|\"USD\"|\"RUB\"|null}.\n\nCâu: " + raw))])],
         config=types.GenerateContentConfig(response_mime_type="application/json"))
@@ -4252,7 +4252,7 @@ def no_view():
                 tot[r["cur"]] = tot.get(r["cur"], 0) + r["amount"]
         if tot:
             out.append(f"{label}: " + " · ".join(bcongno.fmt(v, c) for c, v in tot.items()))
-    out.append("\nBấm một dòng để sửa hoặc tạo việc. Thêm: «Giang nợ 13k» / «nợ Giang 13k».")
+    out.append("\nBấm một dòng để sửa hoặc tạo việc. Thêm: «Bình nợ 13k» / «nợ Bình 13k».")
     return "\n".join(out), InlineKeyboardMarkup(kb)
 
 
@@ -4276,7 +4276,7 @@ async def no_add_reply(message, p: dict):
 
 
 async def no_pay_reply(message, p: dict, quiet: bool) -> bool:
-    """Trừ nợ theo câu «Giang trả 5k». Trả True nếu đã xử lý; quiet=True thì im lặng (trả False) khi không có khoản nợ khớp."""
+    """Trừ nợ theo câu «Bình trả 5k». Trả True nếu đã xử lý; quiet=True thì im lặng (trả False) khi không có khoản nợ khớp."""
     status, data = await asyncio.to_thread(bcongno.pay, p)
     who = f"{p['name']} trả tôi" if p["dir"] == "owe_me" else f"Tôi trả {p['name']}"
     if status == "none":
