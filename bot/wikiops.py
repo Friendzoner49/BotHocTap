@@ -44,6 +44,14 @@ AIWEB_RULE = (
     "trang nguồn ghi rõ «Nguồn: AI web — <tên AI>, chưa kiểm chứng», chỉ giữ kiến thức/phương pháp dùng được, bỏ lời chào và câu hỏi lặp; "
     "khẳng định quan trọng (số liệu, giá, tính năng, ngày) đánh dấu ⚠ chưa kiểm chứng; trái với nguồn đã có trong wiki thì xử lý như MÂU THUẪN. "
 )
+# Bài tóm tắt video / hỏi-đáp do /nghiencuu và nút «📥 Thêm vào wiki» tạo: nạp gọn để kiến thức không vụn (cùng ý với bước 3c của skill cap-nhat-wiki-tuan)
+VIDEO_RULE = (
+    "File tên `video-*` hoặc `hoidap-*` là bài tóm tắt video hoặc hỏi-đáp (thường có các mục 📌 🔑 ⭐ 💎 🆕 ↔ ⚠ 📖 hoặc «📚 Đề xuất cho wiki»): "
+    "trang trong wiki/sources/ chỉ dài vài dòng (nguồn là video/bài nào, link, ngày, 3–5 ý chính); phần đáng giữ (mục 🆕 điểm mới, 💎 điểm độc/lạ, "
+    "🔑 ý chính dùng được, thuật ngữ) GỘP vào trang khái niệm hoặc dự án đã có (tìm trong index.md), chỉ tạo trang khái niệm mới khi chủ đề chưa có trang "
+    "và có từ 2 nguồn trở lên hoặc đủ lớn; ý đã có trong wiki (mục ↔) thì chỉ thêm nguồn mới vào dòng trích dẫn, không chép lại; mục ⚠ giữ dấu ⚠; "
+    "có «📚 Đề xuất cho wiki» thì làm theo, chỉ với trang có thật. "
+)
 
 
 def aiweb_name(p: Path, base: Path) -> str:
